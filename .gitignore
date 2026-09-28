@@ -6,3 +6,4 @@ checkpoints/
 results/*.npz
 *.egg-info/
 .pytest_cache/
+logs/

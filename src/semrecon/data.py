@@ -4,9 +4,11 @@ Dataset: "NFFA-EUROPE - 100% SEM Dataset", Aversa et al., CNR-IOM, 21,169
 1024x768 SEM images in 10 categories. Licence CC-BY.
 DOI 10.23728/b2share.80df8606fcdb4b2bae1656f0dc6db8ba
 
-The images are JPEG and carry a Zeiss information banner near the bottom
-whose top row varies between ~600 and ~680; `load_image` detects it per
-image and keeps only the rows above it.
+The images are JPEG, mostly 1024x768; ~230 are 2048- or 3072-wide and are
+resized to 1024 wide so the pixel scale is comparable. Most carry a Zeiss
+information banner whose top row lies between ~580 and ~690 (at 1024 wide);
+~2% have none. `load_image` detects the banner per image and keeps only the
+rows above it.
 """
 
 from __future__ import annotations
@@ -53,15 +55,24 @@ def download(root: Path, categories=CATEGORIES, keep_tar: bool = False) -> None:
             tar_path.unlink()
 
 
-def banner_top(img: np.ndarray, search_from: int = 512, white: int = 240, frac: float = 0.6) -> int:
-    """First row (below search_from) that is mostly white, i.e. the info banner."""
+def banner_top(img: np.ndarray, search_from: int = 570, white: int = 240, frac: float = 0.95) -> int:
+    """First nearly all-white row at or below `search_from`: the banner's top.
+
+    Searching from row 570 (real banners start at ~580-690) avoids false
+    positives from white specimen backgrounds or bright stripes higher up;
+    at worst ~50 rows of genuinely white content are lost, and every image
+    keeps >= 566 rows. Images without a banner are returned at full height.
+    """
     rows = np.nonzero((img[search_from:] > white).mean(axis=1) > frac)[0]
     return int(rows[0]) + search_from if len(rows) else img.shape[0]
 
 
-def load_image(path: Path, margin: int = 4) -> np.ndarray:
-    """Grayscale float32 in [0, 1] with the info banner removed."""
-    img = np.asarray(Image.open(path).convert("L"))
+def load_image(path: Path, margin: int = 4, width: int = 1024) -> np.ndarray:
+    """Grayscale float32 in [0, 1], resized to `width` if larger, banner removed."""
+    im = Image.open(path).convert("L")
+    if im.width != width:
+        im = im.resize((width, round(im.height * width / im.width)), Image.Resampling.LANCZOS)
+    img = np.asarray(im)
     top = banner_top(img)
     return img[: max(top - margin, 0)].astype(np.float32) / 255.0
 
@@ -128,7 +139,13 @@ def build_eval_set(
         for cat in sorted(by_cat):
             if by_cat[cat] and len(chosen) < n_images:
                 chosen.append(by_cat[cat].pop())
-    crops = np.stack([random_crop(load_image(Path(root) / r["path"]), crop, rng) for r in chosen])
+    crops = []
+    for r in chosen:
+        img = load_image(Path(root) / r["path"])
+        if min(img.shape) < crop:  # defensive; cannot happen with banner_top's search floor
+            raise ValueError(f"{r['path']} is {img.shape} after preprocessing, smaller than crop {crop}")
+        crops.append(random_crop(img, crop, rng))
+    crops = np.stack(crops)
     np.savez_compressed(
         out_path,
         images=(crops * 255).round().astype(np.uint8),

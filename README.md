@@ -19,7 +19,8 @@ The dataset is **NFFA-Europe "100% SEM"** (Aversa et al., CNR-IOM): 21,169 SEM i
 - Paper: R. Aversa, M. H. Modarres, S. Cozzini, R. Ciancio, A. Chiusole, *The first annotated set of scanning electron microscopy images for nanoscience*, Sci. Data 5, 180172 (2018).
 
 Preprocessing (`semrecon/data.py`):
-- Each image carries a Zeiss info banner whose top row ranges from about 608 to 676. It is detected per image, and only the rows above it are kept.
+- The roughly 230 larger images (2048 or 3072 wide) are resized to 1024 wide so the pixel scale is comparable.
+- Most images carry a Zeiss info banner starting at rows 580–690, and about 2% have none. The banner is detected per image as the first nearly all-white row at or below row 570, which avoids false positives from white specimen backgrounds. Only the rows above it are kept.
 - Images are converted to grayscale in [0, 1].
 - The split is 80/10/10 by image, stratified by category.
 - Evaluation uses a frozen set of 512² test crops, one per image, drawn round-robin over categories.
