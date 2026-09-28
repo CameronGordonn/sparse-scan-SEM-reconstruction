@@ -87,6 +87,10 @@ def evaluate(
     unet_ckpt: Path | None = None,
     device: str = "cpu",
     unet_name: str = "unet",
+    diffusion_ckpt: Path | None = None,
+    diffusion_samples: int = 4,
+    diffusion_name: str = "diffusion",
+    diffusion_sampler: dict | None = None,
 ) -> None:
     ev = load_eval_set(eval_set)
     images, cats = ev["images"], ev["categories"]
@@ -137,6 +141,28 @@ def evaluate(
                         "scan_time_rel": scan_time(mask, ScanTiming()) / full_time, "runtime_s": rt,
                     })
         f.flush()
+
+    if "diffusion" in methods:
+        from .models.diffusion import load_model as load_diffusion
+        from .models.diffusion import reconstruct as reconstruct_diffusion
+
+        model = load_diffusion(diffusion_ckpt, device)
+        for p in patterns:
+            for fr in fracs:
+                for i, x in enumerate(images):
+                    y, mask = make_case(x, i, p, fr, regime, dose)
+                    # sampler noise is seeded per case too, so reruns are reproducible
+                    seed = int(eval_seed(i, p, fr).generate_state(1)[0])
+                    t = time.perf_counter()
+                    xhat = reconstruct_diffusion(model, y, mask, device, n_samples=diffusion_samples,
+                                                 seed=seed, **(diffusion_sampler or {}))
+                    rt = time.perf_counter() - t
+                    w.writerow({
+                        "method": diffusion_name, "regime": regime, "dose": dose, "pattern": p, "frac": fr,
+                        "image": i, "category": str(cats[i]), **all_metrics(xhat, x, mask),
+                        "scan_time_rel": scan_time(mask, ScanTiming()) / full_time, "runtime_s": rt,
+                    })
+                    f.flush()
     f.close()
 
 
@@ -196,6 +222,12 @@ def parse_args(argv=None):
     p.add_argument("--workers", type=int)
     p.add_argument("--unet-ckpt", type=Path)
     p.add_argument("--method-name", default="unet", help="label for U-Net rows (e.g. unet_uniform_only)")
+    p.add_argument("--diffusion-ckpt", type=Path)
+    p.add_argument("--diffusion-samples", type=int, default=4, help="ensemble size; metrics use the mean")
+    p.add_argument("--diffusion-name", default="diffusion", help="label for diffusion rows")
+    p.add_argument("--diffusion-steps", type=int, help="override the checkpoint's sampler steps")
+    p.add_argument("--diffusion-consistency", choices=["none", "repaint", "hard"],
+                   help="override the checkpoint's val-selected consistency mode")
     p.add_argument("--eval-set", type=Path, help="override config eval_set")
     p.add_argument("--val-set", type=Path, help="override config val_set")
     p.add_argument("--device", default="cpu")
@@ -214,6 +246,11 @@ def main(args):
     out = args.out or Path(cfg["out_csv"])
     lam_path = Path(cfg["lambdas"])
     lambdas = json.load(open(lam_path)) if lam_path.exists() else {}
+    diffusion_sampler = {}
+    if args.diffusion_steps:
+        diffusion_sampler["steps"] = args.diffusion_steps
+    if args.diffusion_consistency:
+        diffusion_sampler["consistency"] = args.diffusion_consistency
     for reg in cfg["regimes"]:
         regime, dose = reg["regime"], reg["dose"]
         if args.stage in ("tune", "both"):
@@ -229,7 +266,8 @@ def main(args):
         if args.stage in ("eval", "both"):
             evaluate(Path(cfg["eval_set"]), methods, cfg["patterns"], cfg["fracs"], regime, dose, out,
                      lambdas, cfg.get("tv", {}), args.n_images or cfg.get("n_images"), workers,
-                     args.unet_ckpt, args.device, args.method_name)
+                     args.unet_ckpt, args.device, args.method_name,
+                     args.diffusion_ckpt, args.diffusion_samples, args.diffusion_name, diffusion_sampler)
 
 
 if __name__ == "__main__":

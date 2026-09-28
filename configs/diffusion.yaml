@@ -1,0 +1,53 @@
+# Full diffusion run (Colab A100/L4). Paths are relative to the repo root;
+# override from the notebook with --set data.root=/content/nffa etc.
+out_dir: checkpoints/diffusion
+data:
+  root: data/nffa
+  splits: data/splits.csv
+  val_set: data/eval_val.npz
+  patch: 128
+  samples_per_image: 8
+  num_workers: 8
+  cache: false
+sampling:
+  patterns: [uniform, partial_raster, line_hop]
+  frac_min: 0.05
+  frac_max: 0.30
+  dose_min: 5.0
+  dose_max: 100.0
+  fixed_dose_prob: 0.3
+model:
+  base: 64            # see count printed at start
+  mults: [1, 2, 4, 4]
+  time_dim: 128
+  groups: 8
+schedule:
+  num_steps: 1000
+  s: 0.008
+  alpha_bar_min: 1.0e-5   # SAMPLER_FIX.md: avoid abar_T = 0
+sampler:              # default for evaluation; consistency is re-selected on val after training
+  steps: 100
+  eta: 1.0
+  consistency: none   # none | repaint | hard
+  resample: 1         # RePaint jumps; 1 = off
+  x0_clip: 1.0
+train:
+  batch_size: 32
+  lr: 2.0e-4
+  weight_decay: 0.0
+  steps: 150000
+  warmup: 1000
+  grad_clip: 1.0
+  ema: 0.999
+  amp: true
+  val_every: 5000
+  log_every: 200
+  val_images: 6
+  val_fracs: [0.05, 0.1, 0.2, 0.3]
+  val_dose: 20.0
+  val_crop: 256
+  val_steps: 50
+  val_batch: 12
+  select_consistency: true
+  select_samples: 2
+  seed: 0

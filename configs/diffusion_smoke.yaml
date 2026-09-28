@@ -1,0 +1,25 @@
+# CPU smoke test: tiny model, 32px patches, a few steps, few sampler steps.
+out_dir: checkpoints/diffusion_smoke
+data:
+  patch: 32
+  samples_per_image: 1
+  num_workers: 2
+model:
+  base: 8
+  mults: [1, 2, 2]
+  time_dim: 32
+schedule:
+  num_steps: 100
+sampler:
+  steps: 5
+train:
+  batch_size: 4
+  steps: 20
+  warmup: 5
+  val_every: 10
+  log_every: 5
+  val_images: 1
+  val_fracs: [0.1]
+  val_crop: 32
+  val_steps: 5
+  select_samples: 1

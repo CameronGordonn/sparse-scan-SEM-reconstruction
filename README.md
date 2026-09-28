@@ -63,7 +63,7 @@ This model changes the comparison substantially. At 10% of pixels, a uniform mas
 | TV-Poisson | `baselines/tv.py` | λ·TV(x) + Σ_M (x − y log x), the Poisson negative log-likelihood. Same PDHG, using the closed-form KL prox x = ½[(v−τ) + √((v−τ)² + 4τy)]. |
 | U-Net | `models/unet.py` | 7.8M parameters. Input is [zero-filled y, M]. It predicts a residual on top of a normalized-convolution fill. One model covers every f ∈ [5%, 30%], pattern, dose and regime. Loss is L1 + 0.2·(1−SSIM). |
 | U-Net (uniform-only) | same | Ablation: trained on uniform masks only, then tested on all patterns. |
-| Diffusion | `models/diffusion.py` | Ported from the ERA5 project. Conditioned by concatenating (x_t, y, M). Observations are made consistent RePaint-style: they are noised to the current step, replacing the old clean-y substitution. The output is an ensemble mean with a std map. |
+| Diffusion | `models/diffusion.py` | Ported from the ERA5 project (7.9M parameters). Conditioned by concatenating (x_t, y, M), with the time embedding in every block. Masks are drawn per example, and one model covers all fractions and patterns. Two ᾱ off-by-one bugs from the original are fixed. The consistency mode is chosen on val from three: `none` (pure conditional sampling), `repaint` (observations noised to the current step) and `hard` (the original clean-y paste). The Poisson-noisy y makes pasting the observations a real trade-off. The output is the mean of a 4-sample DDIM ensemble with a std map. |
 
 TV's λ is grid-searched per (regime, pattern, fraction) on the **validation** crops only (`results/tv_lambdas.json`).
 
