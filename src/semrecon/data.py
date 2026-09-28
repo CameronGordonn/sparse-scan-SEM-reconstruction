@@ -169,25 +169,74 @@ def eval_seed(image_index: int, pattern: str, frac: float, base: int = 2024) -> 
     return np.random.SeedSequence([base, image_index, PATTERNS.index(pattern), int(round(frac * 1000))])
 
 
+ARRAY_H, ARRAY_W = 768, 1024
+
+
+def _load_uint8(path: Path) -> np.ndarray:
+    return (load_image(path) * 255).round().astype(np.uint8)
+
+
+def build_array_cache(root: Path, splits_csv: Path, split: str, out: Path, workers: int = 8) -> None:
+    """Decode a split once into one uint8 array (N, 768, 1024) + row heights.
+
+    Saved as `<out>` (images, .npy, memory-mappable) and `<out stem>_heights.npy`.
+    Rows keep the CSV order of `read_splits(splits_csv, split)`.
+    """
+    from multiprocessing import Pool
+
+    rows = read_splits(splits_csv, split)
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.lib.format.open_memmap(out, mode="w+", dtype=np.uint8, shape=(len(rows), ARRAY_H, ARRAY_W))
+    heights = np.zeros(len(rows), dtype=np.int32)
+    paths = [Path(root) / r["path"] for r in rows]
+    with Pool(workers) as pool:
+        for i, img in enumerate(pool.imap(_load_uint8, paths, chunksize=16)):
+            h = min(img.shape[0], ARRAY_H)
+            arr[i, :h] = img[:h]
+            heights[i] = h
+            if i % 2000 == 0:
+                print(f"  cached {i}/{len(rows)}", flush=True)
+    arr.flush()
+    np.save(out.with_name(out.stem + "_heights.npy"), heights)
+
+
 class PatchDataset:
     """Random clean patches for training (torch Dataset protocol).
 
     Masks and noise are applied on the fly by the training loop so that
     every epoch sees fresh sampling patterns, fractions and doses.
+
+    cache: False  decode the JPEG for every patch;
+           True   additionally keep decoded images in a per-worker dict;
+           path   read from an array built by `build_array_cache` (memory-
+                  mapped, shared by all workers, no decoding).
     """
 
     def __init__(self, root: Path, splits_csv: Path, split: str, patch: int, samples_per_image: int = 8,
-                 cache: bool = False):
+                 cache: bool | str | Path = False):
         self.root = Path(root)
         self.rows = read_splits(splits_csv, split)
         self.patch = patch
         self.samples_per_image = samples_per_image
+        self._array = self._heights = None
+        self._array_path = None
+        if isinstance(cache, (str, Path)) and cache:
+            self._array_path = Path(cache)
+            self._heights = np.load(self._array_path.with_name(self._array_path.stem + "_heights.npy"))
+            if len(self._heights) != len(self.rows):
+                raise ValueError(f"cache {cache} has {len(self._heights)} images, split has {len(self.rows)}")
+            cache = False
         self._cache: dict[int, np.ndarray] | None = {} if cache else None
 
     def __len__(self) -> int:
         return len(self.rows) * self.samples_per_image
 
     def _image(self, i: int) -> np.ndarray:
+        if self._array_path is not None:
+            if self._array is None:  # open lazily so each DataLoader worker maps it itself
+                self._array = np.load(self._array_path, mmap_mode="r")
+            return self._array[i, : self._heights[i]]
         if self._cache is not None and i in self._cache:
             return self._cache[i]
         img = load_image(self.root / self.rows[i]["path"])
@@ -201,6 +250,8 @@ class PatchDataset:
         rng = np.random.default_rng()
         img = self._image(idx // self.samples_per_image)
         p = random_crop(img, self.patch, rng)
+        if p.dtype == np.uint8:
+            p = p.astype(np.float32) / 255.0
         k = rng.integers(4)
         p = np.rot90(p, k)
         if rng.random() < 0.5:
