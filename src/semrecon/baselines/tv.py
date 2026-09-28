@@ -47,6 +47,7 @@ admm   ADMM on the split z = grad x (TV-L2 only, no box):
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -104,6 +105,7 @@ def objective(x: np.ndarray, y: np.ndarray, mask: np.ndarray, lam: float, data: 
 class History:
     objective: list[float] = field(default_factory=list)
     rel_change: list[float] = field(default_factory=list)
+    seconds: list[float] = field(default_factory=list)  # solver time only, excludes tracking
 
 
 # ---------------------------------------------------------------- PDHG
@@ -126,6 +128,7 @@ def pdhg(
     xbar = x.copy()
     p = np.zeros((2,) + y.shape)
     hist = History()
+    elapsed, t0 = 0.0, time.perf_counter()
     for _ in range(max_iter):
         p = _proj_ball(p + sigma * grad(xbar), lam)
         v = x + tau * div(p)
@@ -143,8 +146,11 @@ def pdhg(
         xbar = 2.0 * x_new - x
         x = x_new
         if track:
+            elapsed += time.perf_counter() - t0
+            hist.seconds.append(elapsed)
             hist.objective.append(objective(x, y, m, lam, data))
             hist.rel_change.append(float(rel))
+            t0 = time.perf_counter()
         if rel < tol:
             break
     return x, hist
@@ -231,6 +237,7 @@ def admm(
     u = np.zeros_like(z)
     my = m * y
     hist = History()
+    elapsed, t0 = 0.0, time.perf_counter()
     for _ in range(max_iter):
         b = my - rho * div(z - u)
         x_new = _pcg(apply_A, b, x, apply_Minv, cg_iters)
@@ -241,8 +248,11 @@ def admm(
         primal_res = np.linalg.norm(gx - z) / max(np.linalg.norm(gx), 1e-12)
         x = x_new
         if track:
+            elapsed += time.perf_counter() - t0
+            hist.seconds.append(elapsed)
             hist.objective.append(objective(x, y, mask.astype(bool), lam, "l2"))
             hist.rel_change.append(float(rel))
+            t0 = time.perf_counter()
         if rel < tol and primal_res < tol:
             break
     return x, hist
