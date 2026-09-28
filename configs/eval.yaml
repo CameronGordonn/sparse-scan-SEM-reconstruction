@@ -1,0 +1,18 @@
+# Evaluation protocol shared by all methods.
+eval_set: data/eval_test.npz
+val_set: data/eval_val.npz
+out_csv: results/metrics.csv
+lambdas: results/tv_lambdas.json
+methods: [biharmonic, tv_l2, tv_kl]
+patterns: [uniform, partial_raster, line_hop]
+fracs: [0.05, 0.10, 0.15, 0.20, 0.30]
+# fixed_dwell: every measured pixel gets `dose` expected counts at x=1.
+# fixed_dose: a full raster at `dose` counts/pixel, redistributed over the sampled pixels.
+regimes:
+  - {regime: fixed_dwell, dose: 20}
+  - {regime: fixed_dose, dose: 2}
+lambda_grid: [0.0015, 0.003, 0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4]
+tune_images: 10
+n_images: 100  # of the 200 frozen crops; ~3 CPU-hours per regime for the classical methods on 8 cores
+workers: 8
+tv: {max_iter: 200, tol: 1.0e-4}

@@ -1,0 +1,16 @@
+# CPU smoke test: tiny model, 64px patches, a few steps.
+out_dir: checkpoints/smoke
+data:
+  patch: 64
+  samples_per_image: 1
+  num_workers: 2
+model:
+  base: 8
+train:
+  batch_size: 4
+  steps: 20
+  warmup: 5
+  val_every: 10
+  log_every: 5
+  val_images: 2
+  val_fracs: [0.1]

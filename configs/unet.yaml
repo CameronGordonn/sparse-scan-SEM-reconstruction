@@ -1,0 +1,38 @@
+# Full U-Net run (Colab A100/L4). Paths are relative to the repo root;
+# override from the notebook with --set data.root=/content/nffa etc.
+out_dir: checkpoints/unet
+data:
+  root: data/nffa
+  splits: data/splits.csv
+  val_set: data/eval_val.npz
+  patch: 256
+  samples_per_image: 8
+  num_workers: 8
+  cache: false
+sampling:
+  patterns: [uniform, partial_raster, line_hop]
+  frac_min: 0.05
+  frac_max: 0.30
+  dose_min: 5.0
+  dose_max: 100.0
+  fixed_dose_prob: 0.3
+model:
+  base: 32            # ~7.8M params
+  mults: [1, 2, 4, 8, 16]
+  residual: true
+  groups: 8
+train:
+  batch_size: 16
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  steps: 60000
+  warmup: 1000
+  grad_clip: 1.0
+  ssim_weight: 0.2
+  amp: true
+  val_every: 2000
+  log_every: 100
+  val_images: 20
+  val_fracs: [0.05, 0.1, 0.2, 0.3]
+  val_dose: 20.0
+  seed: 0
