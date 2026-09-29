@@ -190,6 +190,8 @@ def qualitative(x, recon: dict[str, np.ndarray], y, mask, out: Path, zoom: int =
             for sp in ax.spines.values():
                 sp.set_visible(False)
         axes[0, k].set_title(title, fontsize=9, loc="left")
+    axes[0, 0].set_ylabel(f"full {x.shape[0]}×{x.shape[1]}", fontsize=9)
+    axes[1, 0].set_ylabel(f"top-left {zoom}×{zoom}", fontsize=9)
     _save(fig, out)
 
 
