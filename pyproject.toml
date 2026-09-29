@@ -3,6 +3,8 @@ name = "semrecon"
 version = "0.1.0"
 description = "Sparse-scan SEM image reconstruction: forward model, scan patterns, classical and learned reconstructions"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",

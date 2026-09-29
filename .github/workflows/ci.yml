@@ -1,0 +1,39 @@
+# Runs the full test suite on every push and pull request: forward model, scan patterns and
+# timing, biharmonic/TV solvers against scikit-image, U-Net and diffusion shape/sampler checks,
+# and figure helpers. No dataset or GPU is needed; torch is installed CPU-only.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Test
+        run: pytest -q

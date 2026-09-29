@@ -1,5 +1,7 @@
 # Sparse-scan SEM reconstruction
 
+[![CI](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/actions/workflows/ci.yml/badge.svg)](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/actions/workflows/ci.yml)
+
 A scanning electron microscope builds an image one pixel at a time. If the beam visits only 5–30% of the pixels, acquisition is faster and the specimen receives less dose. The missing pixels then have to be reconstructed.
 
 This repo simulates that acquisition and compares classical and learned reconstructions on real SEM images.
@@ -210,7 +212,12 @@ python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt \
 ```
 src/semrecon/  data, forward, patterns, metrics, evaluate, plots, train_unet, train_diffusion
                baselines/{biharmonic,tv}.py   models/{unet,diffusion}.py
-scripts/       prepare_data, show_patterns, train_*, evaluate, make_figures
+scripts/       prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures
 configs/       eval.yaml, unet.yaml, diffusion.yaml, *smoke.yaml
+results/       metrics*.csv, tv_lambdas.json, summary.md, figures/
 colab/ hpc/ tests/
 ```
+
+## License
+
+The code and the trained model weights are released under the [Apache License 2.0](LICENSE). The NFFA-Europe SEM dataset is © CNR-IOM and licensed [CC-BY](https://doi.org/10.23728/b2share.80df8606fcdb4b2bae1656f0dc6db8ba). It is not redistributed here; `scripts/prepare_data.py` downloads it from B2SHARE.
