@@ -8,9 +8,7 @@ What sets it apart from a generic inpainting benchmark:
 
 - **Physically motivated measurements.** Shot noise is Poisson and scales with dwell time. Sampling patterns respect what scan coils can do: the beam cannot jump anywhere instantly, so full and partial raster lines are compared against the usual uniform-random pixels. A scan-time model charges for every settle and flyback, so methods are compared at equal *acquisition time* as well as at equal pixel count.
 - **Classical solvers written from scratch.** Biharmonic interpolation uses its own sparse solve. TV inpainting has two solvers, Chambolle–Pock primal-dual and ADMM, and two data terms, least squares and the Poisson likelihood. All are checked against scikit-image.
-- **Learned models.** A U-Net conditioned on the sampling mask is trained across fractions, patterns and doses. A conditional diffusion model is adapted from [diffusion-sparse-reconstruction-hpc](../diffusion-sparse-reconstruction-hpc).
-
-> **Status:** code, tests and the evaluation protocol are complete. The full-scale runs (U-Net and diffusion training, the 100-image evaluation) are pending, so the result figures below come from `make_figures.py` once `results/metrics*.csv` exists. Only the pattern and convergence figures are committed now.
+- **Learned models.** A U-Net conditioned on the sampling mask is trained across fractions, patterns and doses. A conditional diffusion model is adapted from [diffusion-sparse-reconstruction-hpc](https://github.com/CameronGordonn/diffusion-sparse-reconstruction-hpc).
 
 ## Data
 
@@ -66,7 +64,7 @@ This model changes the comparison substantially. At 10% of pixels, a uniform mas
 | U-Net (uniform-only) | same | Ablation: trained on uniform masks only, then tested on all patterns. |
 | Diffusion | `models/diffusion.py` | Ported from the ERA5 project (7.9M parameters). Conditioned by concatenating (x_t, y, M), with the time embedding in every block. Masks are drawn per example, and one model covers all fractions and patterns. Two ᾱ off-by-one bugs from the original are fixed. The consistency mode is chosen on val from three: `none` (pure conditional sampling), `repaint` (observations noised to the current step) and `hard` (the original clean-y paste). The Poisson-noisy y makes pasting the observations a real trade-off. The output is the mean of a 4-sample DDIM ensemble with a std map. |
 
-TV's λ is grid-searched per (regime, pattern, fraction) on the **validation** crops only (`results/tv_lambdas.json`).
+TV's λ is grid-searched per (regime, pattern, fraction) on the **validation** crops only (`results/tv_lambdas.json`), over 0.0015–1.6 in factors of two. The grid originally stopped at 0.4. At fixed dose, TV-Poisson picked 0.4 in 7 of 15 cases, so the grid was extended. Only line-hop at 30% then moved (to 0.8), and those rows were re-evaluated. No other choice lies on the grid edge.
 
 ### TV solvers: PDHG vs ADMM
 
@@ -76,22 +74,95 @@ This is TV-L2 on a 256² crop with 10% line-hop sampling. Suboptimality is measu
 
 - **Per iteration**, ADMM converges far faster than PDHG.
 - **Per wall-clock second**, the ranking changes. The x-update needs an inner CG solve of (M + ρ∇ᵀ∇)x = b, because the mask stops any fast transform from diagonalising it.
-- **The DCT preconditioner** replaces M by its mean f, which makes the system exactly diagonal in the DCT-II basis. It helps only a little per iteration and costs about 6× the time per iteration. With structured masks, f·I is a poor stand-in for M.
+- **The DCT preconditioner** replaces M by its mean f, which makes the system exactly diagonal in the DCT-II basis. It helps only a little per iteration and costs about twice the time per iteration of plain CG. With structured masks, f·I is a poor stand-in for M.
 - **In practice**, plain-CG ADMM and PDHG are both adequate. PDHG, warm-started, settles in about 100 iterations; from a zero start it takes more than 1000, because TV only spreads information into a gap about one pixel per iteration.
 
 ## Results
 
-`python scripts/make_figures.py` writes the following to `results/figures/`, and writes `results/summary.md`:
+**Setup.**
+- **Test set:** every method sees the same 100 frozen 512² test crops.
+- **Cases:** 3 patterns × 5 fractions × 2 dose regimes, so 30 cases per image and 3,000 reconstructions per method. Masks and noise are identical across methods.
+- **Training:** on one A100.
+  - U-Net: 60k steps.
+  - Uniform-only ablation: 30k steps.
+  - Diffusion: 150k steps.
+- **Diffusion sampler:** chosen on val. Pure conditional sampling (`none`) scored 23.08 dB, against 18.08 for `repaint` and 17.78 for `hard`.
+- **Classical methods:** run on CPU.
 
-- `psnr_vs_frac_<regime>.png`, `ssim_vs_frac_<regime>.png` and `psnr_unobserved_vs_frac_<regime>.png`: one panel per pattern, one line per method, with 95% bootstrap CIs over images.
-- `psnr_vs_time_<regime>.png`: PSNR against relative scan time, which is the comparison that matters to a microscopist.
-- `qualitative_*.png`: ground truth, the measurement, and every method's output on one crop.
+Raw rows are in `results/metrics*.csv`.
 
-Early observations from a 3-image smoke run (not final numbers):
-- TV beats biharmonic by 3–6 dB at dose 20, because biharmonic reproduces the noise.
-- Biharmonic's PSNR doesn't improve with more partial-raster lines, because each extra line adds noise it can't remove.
+### Mean over all fractions
 
-*(Full tables are pasted here from `results/summary.md` after the evaluation runs.)*
+PSNR in dB by sampling pattern; SSIM is averaged over all cases.
+
+| method | fixed dwell: uniform | partial raster | line-hop | SSIM | fixed dose: uniform | partial raster | line-hop | SSIM |
+|---|---|---|---|---|---|---|---|---|
+| Biharmonic | 18.03 | 19.66 | 16.75 | 0.27 | 16.87 | 18.41 | 15.65 | 0.24 |
+| TV-L2 | 24.05 | 23.53 | 23.21 | 0.48 | 23.72 | 23.15 | 22.84 | 0.47 |
+| TV-Poisson | 23.70 | 23.25 | 22.90 | 0.46 | 23.26 | 22.74 | 22.55 | 0.44 |
+| U-Net (uniform-only) | 25.90 | 22.79 | 23.53 | 0.51 | 25.49 | 21.99 | 22.84 | 0.48 |
+| **U-Net** | **26.11** | **25.48** | **25.22** | **0.58** | **25.71** | **25.09** | **24.88** | **0.57** |
+| Diffusion | 25.79 | 25.08 | 24.83 | 0.55 | 25.36 | 24.64 | 24.46 | 0.54 |
+
+### At 10% sampling
+
+At f = 10% the two regimes coincide, since D = 2 / 0.1 = 20. The ± values are 95% bootstrap half-widths over images. They are mostly image-to-image variation; the paired differences below are much tighter. `results/summary.md` has the SSIM version.
+
+| method | uniform | partial raster | line-hop |
+|---|---|---|---|
+| Biharmonic | 17.91 ± 0.46 | 19.96 ± 0.61 | 16.27 ± 0.48 |
+| TV-L2 | 23.51 ± 1.02 | 22.77 ± 1.02 | 22.47 ± 0.99 |
+| TV-Poisson | 23.16 ± 0.92 | 22.59 ± 1.02 | 22.24 ± 1.01 |
+| U-Net (uniform-only) | 25.45 ± 1.15 | 21.59 ± 0.88 | 22.40 ± 1.02 |
+| **U-Net** | **25.67 ± 1.16** | **24.83 ± 1.20** | **24.61 ± 1.21** |
+| Diffusion | 25.30 ± 1.17 | 24.41 ± 1.20 | 24.18 ± 1.20 |
+
+### Paired differences
+
+Each image's PSNR difference is averaged over its cases. The interval is a 95% bootstrap CI over the 100 images.
+
+| comparison | fixed dwell | fixed dose | first method better on |
+|---|---|---|---|
+| U-Net − TV-L2 | +2.01 [1.78, 2.25] | +1.99 [1.76, 2.24] | 99% of images |
+| U-Net − Diffusion | +0.37 [0.33, 0.42] | +0.41 [0.36, 0.45] | 98–99% |
+| Diffusion − TV-L2 | +1.64 [1.42, 1.87] | +1.58 [1.37, 1.83] | 98% |
+| TV-L2 − TV-Poisson | +0.31 [0.18, 0.45] | +0.39 [0.26, 0.53] | 71–83% |
+| U-Net − uniform-only, partial raster | +2.69 [2.26, 3.18] | +3.10 [2.61, 3.63] | 100% |
+| U-Net − uniform-only, line-hop | +1.69 [1.40, 2.02] | +2.04 [1.66, 2.46] | 100% |
+
+![psnr vs fraction, fixed dwell](results/figures/psnr_vs_frac_fixed_dwell.png)
+![psnr vs fraction, fixed dose](results/figures/psnr_vs_frac_fixed_dose.png)
+![psnr vs scan time, fixed dwell](results/figures/psnr_vs_time_fixed_dwell.png)
+![qualitative, line-hop 10%](results/figures/qualitative_line_hop_10pct_fixed_dwell.png)
+
+### Findings
+
+- **The U-Net is best in every one of the 30 cases, in both regimes.**
+  - It gains about 2 dB over the best classical method, TV-L2, and is better on 99% of individual images.
+  - It is also by far the fastest: 0.03 s per 512² crop on an A100, against about 12 s for TV in one CPU worker process.
+- **Diffusion comes second, but it doesn't beat the direct regressor on these metrics.**
+  - It trails the U-Net by 0.37–0.41 dB and is worse on 98–99% of images.
+  - It takes 4.8 s per crop: 4 samples × 100 DDIM steps.
+  - PSNR and SSIM reward the conditional mean, which is exactly what the U-Net is trained to predict. Even a 4-sample ensemble mean only approaches it.
+  - Enforcing the measurements during sampling hurts badly, by about 5 dB on val. The observations carry Poisson noise, so pasting them back in, clean or re-noised, injects that noise.
+- **Training on scan-feasible patterns matters.**
+  - The uniform-only ablation nearly matches the U-Net on uniform masks, trailing by only 0.2 dB.
+  - It loses 1.7–3.1 dB on partial raster and line-hop, and falls below TV-L2 on partial raster.
+  - In the qualitative panel it invents streak texture along the line-hop segments.
+- **At equal scan time, contiguous sampling wins by a wide margin.** Scan time here is relative to a full raster, from the settle and flyback model.
+  - In the fixed-dwell regime, partial raster at 30% (0.30× the raster time) beats uniform at 5% (0.34×) for every method: U-Net 27.08 vs 24.64 dB, TV-L2 25.21 vs 22.70 dB.
+  - Uniform sampling spends most of its time on coil settling.
+  - At fixed dose the margin shrinks, to +0.6 dB for the U-Net and +0.7 dB for diffusion. It reverses for biharmonic, TV-Poisson and the uniform-only U-Net, because those 30% of pixels carry only 6.7 counts each.
+- **At a fixed total dose, only methods that denoise benefit from spreading it over more pixels.**
+  - As f goes from 5% to 30%, the U-Net improves from 24.25 to 25.82 dB and TV-L2 from 22.78 to 23.83 dB.
+  - Biharmonic falls from 19.07 to 14.59 dB, because it interpolates the noise exactly.
+  - The learned models' gains flatten beyond about 15%.
+- **The Poisson data term doesn't help.**
+  - TV-Poisson trails TV-L2 by 0.3–0.4 dB, including at fixed dose, where measured pixels get as few as 6.7 counts.
+  - The λ grid was extended to rule out a tuning artifact.
+  - Possible reasons: at these counts the Gaussian approximation is already adequate, and the reference images are themselves noisy JPEGs.
+
+`python scripts/make_figures.py` also writes SSIM and unmeasured-pixel PSNR against fraction (`ssim_vs_frac_<regime>.png`, `psnr_unobserved_vs_frac_<regime>.png`) and the fixed-dose scan-time plot. When the result CSVs cover different image sets, only the shared images are compared.
 
 ## What this simulation ignores
 
@@ -112,13 +183,26 @@ uv venv && uv pip install -e ".[dev]"      # add --extra-index-url https://downl
 pytest -q                                   # forward model, patterns, solvers vs skimage, U-Net, diffusion
 
 python scripts/prepare_data.py --root data/nffa         # ~13.5 GB download + splits + frozen eval crops
-python scripts/evaluate.py                               # tune TV lambda on val, run classical methods (CPU, multiprocess)
-python scripts/train_unet.py --config configs/unet.yaml  # GPU
-python scripts/evaluate.py --stage eval --methods unet --unet-ckpt checkpoints/unet/best.pt --device cuda
-python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt
+python scripts/evaluate.py                               # tune TV lambda on val, run classical methods (CPU, ~11 h with 5 workers)
+
+# GPU. The optional uint8 cache decodes the training split once (~13 GB) so data loading keeps up with an A100.
+python scripts/cache_images.py --out /tmp/train_uint8.npy
+python scripts/train_unet.py --config configs/unet.yaml --set data.cache=/tmp/train_uint8.npy
+python scripts/train_unet.py --config configs/unet.yaml --out-dir checkpoints/unet_uniform_only \
+    --set data.cache=/tmp/train_uint8.npy --set "sampling.patterns=[uniform]" --set train.steps=30000
+python scripts/train_diffusion.py --config configs/diffusion.yaml --set data.cache=/tmp/train_uint8.npy
+
+python scripts/evaluate.py --stage eval --methods unet --unet-ckpt checkpoints/unet/best.pt --device cuda --out results/metrics_unet.csv
+python scripts/evaluate.py --stage eval --methods unet --unet-ckpt checkpoints/unet_uniform_only/best.pt \
+    --method-name unet_uniform_only --device cuda --out results/metrics_unet_uniform_only.csv
+python scripts/evaluate.py --stage eval --methods diffusion --diffusion-ckpt checkpoints/diffusion/best.pt \
+    --device cuda --out results/metrics_diffusion.csv    # ~4 h on an A100; split with --image-start/--n-images
+
+python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt \
+    --unet-uniform-ckpt checkpoints/unet_uniform_only/best.pt --diffusion-ckpt checkpoints/diffusion/best.pt
 ```
 
-- **Colab:** `colab/train.ipynb` keeps the dataset tars and checkpoints on Drive, extracts to local disk each session, trains, and evaluates.
+- **Colab:** `colab/train.ipynb` keeps the dataset tars, splits, eval sets, checkpoints and results on Drive, and extracts the images to local disk each session. Run it cell by cell, or run its last section to launch `colab/launch_all.sh`, which trains and evaluates every learned model unattended in two parallel lanes on one GPU.
 - **SLURM:** `hpc/sbatch_train_*.sh`.
 
 ## Layout
