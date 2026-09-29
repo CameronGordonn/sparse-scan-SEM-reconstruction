@@ -91,11 +91,14 @@ def evaluate(
     diffusion_samples: int = 4,
     diffusion_name: str = "diffusion",
     diffusion_sampler: dict | None = None,
+    image_start: int = 0,
 ) -> None:
     ev = load_eval_set(eval_set)
     images, cats = ev["images"], ev["categories"]
-    if n_images is not None:
-        images, cats = images[:n_images], cats[:n_images]
+    # evaluate images [image_start, image_start + n_images); indices stay global so seeds match any other run
+    stop = len(images) if n_images is None else min(image_start + n_images, len(images))
+    idx = range(image_start, stop)
+    images, cats = images[:stop], cats[:stop]
     full_time = scan_time(np.ones(images.shape[1:], bool), ScanTiming())
     lambdas = lambdas or {}
 
@@ -108,7 +111,7 @@ def evaluate(
         w.writeheader()
 
     classical = [m for m in methods if m in CLASSICAL]
-    tasks = [(m, i, p, fr) for m in classical for p in patterns for fr in fracs for i in range(len(images))]
+    tasks = [(m, i, p, fr) for m in classical for p in patterns for fr in fracs for i in idx]
     fn = partial(_classical_task, images=images, categories=cats, regime=regime, dose=dose,
                  lambdas=lambdas, tv_kw=tv_kw, full_time=full_time)
     if tasks:
@@ -130,7 +133,8 @@ def evaluate(
         model = load_model(unet_ckpt, device)
         for p in patterns:
             for fr in fracs:
-                for i, x in enumerate(images):
+                for i in idx:
+                    x = images[i]
                     y, mask = make_case(x, i, p, fr, regime, dose)
                     t = time.perf_counter()
                     xhat = reconstruct(model, y, mask, device)
@@ -149,7 +153,8 @@ def evaluate(
         model = load_diffusion(diffusion_ckpt, device)
         for p in patterns:
             for fr in fracs:
-                for i, x in enumerate(images):
+                for i in idx:
+                    x = images[i]
                     y, mask = make_case(x, i, p, fr, regime, dose)
                     # sampler noise is seeded per case too, so reruns are reproducible
                     seed = int(eval_seed(i, p, fr).generate_state(1)[0])
@@ -219,6 +224,8 @@ def parse_args(argv=None):
     p.add_argument("--stage", choices=["tune", "eval", "both"], default="both")
     p.add_argument("--methods", nargs="*")
     p.add_argument("--n-images", type=int)
+    p.add_argument("--image-start", type=int, default=0,
+                   help="first test image index (e.g. to extend an earlier --n-images run)")
     p.add_argument("--workers", type=int)
     p.add_argument("--unet-ckpt", type=Path)
     p.add_argument("--method-name", default="unet", help="label for U-Net rows (e.g. unet_uniform_only)")
@@ -267,7 +274,8 @@ def main(args):
             evaluate(Path(cfg["eval_set"]), methods, cfg["patterns"], cfg["fracs"], regime, dose, out,
                      lambdas, cfg.get("tv", {}), args.n_images or cfg.get("n_images"), workers,
                      args.unet_ckpt, args.device, args.method_name,
-                     args.diffusion_ckpt, args.diffusion_samples, args.diffusion_name, diffusion_sampler)
+                     args.diffusion_ckpt, args.diffusion_samples, args.diffusion_name, diffusion_sampler,
+                     args.image_start)
 
 
 if __name__ == "__main__":
