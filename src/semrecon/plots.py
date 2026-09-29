@@ -71,6 +71,24 @@ def load_rows(paths: list[Path]) -> list[dict]:
     return list(uniq.values())
 
 
+def matched(rows) -> tuple[list[dict], int]:
+    """Keep only images evaluated by every method, per (regime, pattern, frac).
+
+    Methods run on different image subsets (e.g. a cheaper --n-images run)
+    would otherwise be averaged over different, not equally hard, images.
+    Returns the kept rows and the number dropped.
+    """
+    methods = defaultdict(set)
+    images = defaultdict(set)
+    for r in rows:
+        k = (r["regime"], r["pattern"], r["frac"])
+        methods[k].add(r["method"])
+        images[(k, r["method"])].add(r["image"])
+    common = {k: set.intersection(*(images[(k, m)] for m in ms)) for k, ms in methods.items()}
+    kept = [r for r in rows if r["image"] in common[(r["regime"], r["pattern"], r["frac"])]]
+    return kept, len(rows) - len(kept)
+
+
 def _methods(rows):
     present = {r["method"] for r in rows}
     return [m for m in METHOD_STYLE if m in present] + sorted(present - METHOD_STYLE.keys())

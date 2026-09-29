@@ -42,7 +42,9 @@ def curves(args):
     if not paths:
         print("no metrics CSVs found; skipping curves")
         return
-    rows = plots.load_rows(paths)
+    rows, dropped = plots.matched(plots.load_rows(paths))
+    if dropped:
+        print(f"note: dropped {dropped} rows for images not evaluated by every method")
     regimes = sorted({r["regime"] for r in rows})
     md = []
     for regime in regimes:
