@@ -25,6 +25,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .uncertainty import QS as U_QS
+
 SURFACE = "#fcfcfb"
 INK = "#1f1f1e"
 INK_MUTED = "#6b6a63"
@@ -334,3 +336,121 @@ def _save(fig, out: Path):
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+
+# ------------------------------------------------ diffusion analysis (scripts/diffusion_analysis.py)
+
+SAMPLE_STYLE = {"color": "#4a3aa7", "marker": "o", "label": "Diffusion, single sample"}
+MEAN_STYLE = {**METHOD_STYLE["diffusion"], "label": "Diffusion, ensemble mean"}
+
+
+def diffusion_analysis_figures(rows, curves, examples, ensemble, out: Path) -> None:
+    _style()
+    out = Path(out)
+    # 1. PSNR vs ensemble size, per pattern, with the U-Net as a dashed reference
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ns = [n for n in ensemble if f"psnr_mean{n}" in rows[0]]
+    for p in PATTERN_ORDER:
+        rs = [r for r in rows if r["pattern"] == p]
+        if not rs:
+            continue
+        s = PATTERN_STYLE[p]
+        ax.plot(ns, [np.mean([r[f"psnr_mean{n}"] for r in rs]) for n in ns], color=s["color"], marker=s["marker"],
+                label=f"diffusion mean, {s['label']}", markeredgecolor=SURFACE, markeredgewidth=1.5)
+        ax.axhline(np.mean([r["psnr_unet"] for r in rs]), color=s["color"], ls="--", lw=1.2)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(ns, [str(n) for n in ns])
+    ax.minorticks_off()
+    ax.set_xlabel("diffusion samples averaged")
+    ax.set_ylabel("PSNR (dB)")
+    ax.set_title("Ensemble size (dashed: U-Net, same pattern)", loc="left", fontsize=11)
+    fig.legend(*ax.get_legend_handles_labels(), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.0))
+    _save(fig, out / "diffusion_ensemble.png")
+
+    # 2. uncertainty: calibration and sparsification, averaged over cases
+    C = np.stack(list(curves.values()))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    s_bins, rmse_bins = C[:, 0, :10].mean(0), C[:, 1, :10].mean(0)
+    lim = max(s_bins.max(), rmse_bins.max()) * 1.1
+    axes[0].plot([0, lim], [0, lim], color=INK_MUTED, lw=1, ls="--", label="perfectly calibrated")
+    axes[0].plot(s_bins, rmse_bins, color=MEAN_STYLE["color"], marker="o", markeredgecolor=SURFACE, label="diffusion")
+    axes[0].set_xlabel("predicted std (sample spread)")
+    axes[0].set_ylabel("actual RMSE of the ensemble mean")
+    axes[0].set_title("Calibration (10 equal-count bins)", loc="left", fontsize=11)
+    axes[0].legend(loc="upper left")
+    qs = U_QS
+    for idx, lab, col, ls in ((2, "drop highest predicted std", MEAN_STYLE["color"], "-"),
+                              (3, "oracle: drop largest errors", INK, "--"),
+                              (4, "random", INK_MUTED, ":")):
+        axes[1].plot(qs, C[:, idx, :10].mean(0), color=col, ls=ls, label=lab)
+    axes[1].set_xlabel("fraction of unmeasured pixels removed")
+    axes[1].set_ylabel("RMSE of the remaining pixels")
+    axes[1].set_title("Sparsification", loc="left", fontsize=11)
+    axes[1].legend(loc="lower left")
+    _save(fig, out / "diffusion_uncertainty.png")
+
+    # 3. texture: power spectrum relative to the ground truth
+    fig, ax = plt.subplots(figsize=(7, 4))
+    f = (np.arange(64) + 0.5) / 64
+    gt = C[:, 5, :]
+    for idx, s in ((6, METHOD_STYLE["unet"]), (7, MEAN_STYLE), (8, SAMPLE_STYLE)):
+        ratio = np.exp(np.mean(np.log(C[:, idx, :] / gt), 0))  # geometric mean over cases
+        ax.plot(f, ratio, color=s["color"], label=s["label"])
+    ax.axhline(1, color=INK_MUTED, lw=1, ls="--")
+    ax.set_yscale("log")
+    ax.set_xlabel("spatial frequency (fraction of Nyquist)")
+    ax.set_ylabel("power / ground-truth power")
+    ax.set_title("Texture: how much fine detail survives (1 = matches truth)", loc="left", fontsize=11)
+    ax.legend(loc="lower left")
+    _save(fig, out / "diffusion_texture.png")
+
+    # 4. example panel
+    if examples:
+        key = next((k for k in examples if "line_hop/0.10" in k), next(iter(examples)))
+        x, y, mask, xu, mean, one, std = examples[key].astype(np.float32)
+        err = np.abs(mean - x)
+        panels = [("ground truth", x, "gray"), ("U-Net", xu, "gray"), ("diffusion mean", mean, "gray"),
+                  ("one diffusion sample", one, "gray"), ("sample spread (std)", std, "magma"),
+                  ("|error| of the mean", err, "magma")]
+        fig, axes = plt.subplots(1, len(panels), figsize=(2.6 * len(panels), 3))
+        vmax = np.percentile(np.concatenate([std.ravel(), err.ravel()]), 99)
+        for ax, (t, im, cm) in zip(axes, panels):
+            ax.imshow(im[:192, :192], cmap=cm, vmin=0, vmax=1 if cm == "gray" else vmax, interpolation="nearest")
+            ax.set_title(t, fontsize=9, loc="left")
+            ax.set_xticks([]), ax.set_yticks([])
+            ax.grid(False)
+        img, pat, fr = key.split("/")
+        fig.suptitle(f"Test image {img}, {pat.replace('_', '-')} {float(fr):.0%}, top-left 192×192",
+                     fontsize=10, color=INK)
+        _save(fig, out / "diffusion_example.png")
+
+
+def diffusion_analysis_tables(rows, ensemble) -> str:
+    nan = lambda v: np.nanmean(v) if np.isfinite(v).any() else float("nan")
+    col = lambda rs, k: np.array([r[k] for r in rs], float)
+    md = [f"{len(rows)} cases: {len({r['image'] for r in rows})} test images × patterns × fractions.\n",
+          "### Accuracy vs texture\n",
+          "| pattern | PSNR U-Net | PSNR diffusion mean | PSNR one sample | high-freq power U-Net | mean | one sample | LPIPS U-Net | mean | one sample |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
+    for p in PATTERN_ORDER + ["all"]:
+        rs = rows if p == "all" else [r for r in rows if r["pattern"] == p]
+        if not rs:
+            continue
+        nm = max(n for n in ensemble if f"psnr_mean{n}" in rs[0])
+        md.append(f"| {PATTERN_STYLE.get(p, {'label': 'all'})['label']} | {nan(col(rs, 'psnr_unet')):.2f} | "
+                  f"{nan(col(rs, f'psnr_mean{nm}')):.2f} | {nan(col(rs, 'psnr_sample')):.2f} | "
+                  f"{nan(col(rs, 'hf_unet')):.2f} | {nan(col(rs, 'hf_mean')):.2f} | {nan(col(rs, 'hf_sample')):.2f} | "
+                  f"{nan(col(rs, 'lpips_unet')):.3f} | {nan(col(rs, 'lpips_mean')):.3f} | {nan(col(rs, 'lpips_sample')):.3f} |")
+    md.append("\nHigh-frequency power is relative to the ground truth over 0.15–0.5 × Nyquist "
+              "(1 = same amount of fine detail; above half Nyquist the reference is mostly noise). LPIPS is a learned perceptual distance (lower = closer).\n")
+    md += ["### Ensemble size\n", "| samples averaged | " + " | ".join(str(n) for n in ensemble if f"psnr_mean{n}" in rows[0]) + " |",
+           "|---|" + "---|" * len([n for n in ensemble if f"psnr_mean{n}" in rows[0]]),
+           "| PSNR (dB) | " + " | ".join(f"{nan(col(rows, f'psnr_mean{n}')):.2f}" for n in ensemble if f"psnr_mean{n}" in rows[0]) + " |",
+           "\n### Uncertainty\n",
+           "| pattern | Spearman(std, abs error) | AUSE (lower is better) | AUSE, random ranking |", "|---|---|---|---|"]
+    for p in PATTERN_ORDER + ["all"]:
+        rs = rows if p == "all" else [r for r in rows if r["pattern"] == p]
+        if rs:
+            md.append(f"| {PATTERN_STYLE.get(p, {'label': 'all'})['label']} | {nan(col(rs, 'spearman_std_err')):.2f} | "
+                      f"{nan(col(rs, 'ause')):.4f} | {nan(col(rs, 'ause_random')):.4f} |")
+    return "\n".join(md) + "\n"

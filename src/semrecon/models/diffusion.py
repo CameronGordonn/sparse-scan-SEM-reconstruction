@@ -303,9 +303,9 @@ def load_model(ckpt_path: str | Path, device: str | torch.device = "cpu") -> Dif
 
 
 @torch.no_grad()
-def reconstruct_batch(model: DiffusionUNet, y: torch.Tensor, mask: torch.Tensor, n_samples: int = 4,
-                      generator: torch.Generator | None = None, **sampler_kw):
-    """(B,1,H,W) -> (mean, std) over n_samples, each (B,1,H,W). Pads to a multiple of model.factor."""
+def sample_ensemble(model: DiffusionUNet, y: torch.Tensor, mask: torch.Tensor, n_samples: int = 4,
+                    generator: torch.Generator | None = None, **sampler_kw) -> torch.Tensor:
+    """(B,1,H,W) -> every sample, (B, n_samples, 1, H, W). Pads to a multiple of model.factor."""
     H, W = y.shape[-2:]
     f = model.factor
     ph, pw = (-H) % f, (-W) % f
@@ -316,7 +316,14 @@ def reconstruct_batch(model: DiffusionUNet, y: torch.Tensor, mask: torch.Tensor,
     ys = y.repeat_interleave(n_samples, 0)
     ms = mask.repeat_interleave(n_samples, 0)
     xs = sample(model, model.schedule, ys, ms, generator=generator, **kw)
-    xs = xs[..., :H, :W].view(B, n_samples, 1, H, W)
+    return xs[..., :H, :W].view(B, n_samples, 1, H, W)
+
+
+@torch.no_grad()
+def reconstruct_batch(model: DiffusionUNet, y: torch.Tensor, mask: torch.Tensor, n_samples: int = 4,
+                      generator: torch.Generator | None = None, **sampler_kw):
+    """(B,1,H,W) -> (mean, std) over n_samples, each (B,1,H,W). Pads to a multiple of model.factor."""
+    xs = sample_ensemble(model, y, mask, n_samples, generator, **sampler_kw)
     return xs.mean(1), xs.std(1) if n_samples > 1 else torch.zeros_like(xs[:, 0])
 
 
