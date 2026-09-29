@@ -206,6 +206,17 @@ Each category has 10 test images. The ordering holds in all 10 categories and bo
   - quantisation, and offset/gain drift.
 - **Ground truth is not truth.** The "clean" images are themselves noisy, JPEG-compressed acquisitions. Metrics measure agreement with another noisy image, and the learned models partly learn JPEG artifacts.
 
+## Pretrained weights
+
+The three trained models are attached to the [`weights-v1` release](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/releases/tag/weights-v1). Each is an inference-only checkpoint of about 31 MB, and the release notes list their sha256 checksums. With them you can skip training and go straight to evaluation or `make_figures.py`:
+
+```bash
+mkdir -p checkpoints/{unet,unet_uniform_only,diffusion}
+for m in unet unet_uniform_only diffusion; do
+  curl -L -o checkpoints/$m/best.pt https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/releases/download/weights-v1/$m.pt
+done
+```
+
 ## Reproduce
 
 ```bash
