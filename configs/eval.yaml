@@ -11,7 +11,7 @@ fracs: [0.05, 0.10, 0.15, 0.20, 0.30]
 regimes:
   - {regime: fixed_dwell, dose: 20}
   - {regime: fixed_dose, dose: 2}
-lambda_grid: [0.0015, 0.003, 0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4]
+lambda_grid: [0.0015, 0.003, 0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6]
 tune_images: 10
 n_images: 100  # of the 200 frozen crops; ~3 CPU-hours per regime for the classical methods on 8 cores
 workers: 8
