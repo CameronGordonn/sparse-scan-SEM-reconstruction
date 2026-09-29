@@ -4,6 +4,8 @@
 
 A scanning electron microscope builds an image one pixel at a time. If the beam visits only 5–30% of the pixels, acquisition is faster and the specimen receives less dose. The missing pixels then have to be reconstructed.
 
+**New to the topic?** [`docs/results-explained.pdf`](docs/results-explained.pdf) walks through the study and its findings in plain language, with the key figures.
+
 This repo simulates that acquisition and compares classical and learned reconstructions on real SEM images.
 
 What sets it apart from a generic inpainting benchmark:
