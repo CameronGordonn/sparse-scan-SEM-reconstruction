@@ -1,7 +1,9 @@
 """Build all result figures and the markdown summary table.
 
     python scripts/make_figures.py                                  # from results/metrics*.csv
-    python scripts/make_figures.py --unet-ckpt ckpt.pt --diffusion-ckpt dckpt.pt   # add learned methods to the qualitative panel
+    python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt \
+        --unet-uniform-ckpt checkpoints/unet_uniform_only/best.pt \
+        --diffusion-ckpt checkpoints/diffusion/best.pt     # add learned methods to the qualitative panel
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ def parse_args():
     p.add_argument("--dose", type=float, default=20.0)
     p.add_argument("--table-frac", type=float, default=0.10)
     p.add_argument("--unet-ckpt", type=Path)
+    p.add_argument("--unet-uniform-ckpt", type=Path, help="uniform-only ablation U-Net")
     p.add_argument("--diffusion-ckpt", type=Path)
     p.add_argument("--device", default="cpu")
     p.add_argument("--skip", nargs="*", default=[], choices=["curves", "qualitative", "convergence"])
@@ -66,10 +69,11 @@ def qualitative(args):
     recon = {"biharmonic": run_classical("biharmonic", y, mask)}
     for m in ("tv_l2", "tv_kl"):
         recon[m] = run_classical(m, y, mask, lambdas.get(m, {}).get(key, 0.025), {"max_iter": 200, "tol": 1e-4})
-    if args.unet_ckpt:
-        from semrecon.models.unet import load_model, reconstruct
+    from semrecon.models.unet import load_model, reconstruct
 
-        recon["unet"] = reconstruct(load_model(args.unet_ckpt, args.device), y, mask, args.device)
+    for name, ckpt in (("unet_uniform_only", args.unet_uniform_ckpt), ("unet", args.unet_ckpt)):
+        if ckpt:
+            recon[name] = reconstruct(load_model(ckpt, args.device), y, mask, args.device)
     if args.diffusion_ckpt:
         from semrecon.models.diffusion import load_model as load_diff, reconstruct as recon_diff
 

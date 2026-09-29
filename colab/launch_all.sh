@@ -37,7 +37,7 @@ lane_b() {
     > "$OUT/logs/diffusion.log" 2>&1 && echo "diffusion trained $(date)"
   rm -f "$OUT/results/metrics_diffusion.csv"
   python scripts/evaluate.py --stage eval --methods diffusion --diffusion-ckpt "$OUT/checkpoints/diffusion/best.pt" \
-    --diffusion-samples 4 --n-images 50 --device cuda --out "$OUT/results/metrics_diffusion.csv" \
+    --diffusion-samples 4 --n-images 100 --device cuda --out "$OUT/results/metrics_diffusion.csv" \
     > "$OUT/logs/eval_diffusion.log" 2>&1 && echo "diffusion evaluated $(date)"
 }
 
