@@ -175,6 +175,121 @@ def summary_table(rows, regime: str, frac: float, metric: str = "psnr") -> str:
     return "\n".join(lines)
 
 
+def _per_image(rows, regime, method, category=None):
+    """{image: mean PSNR over this regime's (pattern, frac) cases}."""
+    g = defaultdict(list)
+    for r in rows:
+        if r["regime"] == regime and r["method"] == method and (category is None or r["category"] == category):
+            g[r["image"]].append(r["psnr"])
+    return {i: float(np.mean(v)) for i, v in g.items()}
+
+
+def _categories(rows, regime):
+    """Categories sorted by U-Net mean PSNR (hardest first), else alphabetically."""
+    cats = sorted({r["category"] for r in rows if r["regime"] == regime})
+    if any(r["method"] == "unet" for r in rows):
+        cats.sort(key=lambda c: np.mean(list(_per_image(rows, regime, "unet", c).values())))
+    return cats
+
+
+def category_dots(rows, regime: str, out: Path) -> None:
+    """Dot plot: mean PSNR per category (rows) and method (markers), over all patterns and fractions."""
+    _style()
+    cats, methods = _categories(rows, regime), _methods(rows)
+    fig, ax = plt.subplots(figsize=(8, 0.42 * len(cats) + 1.4))
+    for k in range(len(cats)):
+        ax.axhline(k, color=GRID, lw=0.8, zorder=0)
+    for m in methods:
+        s = METHOD_STYLE.get(m, {"color": INK_MUTED, "marker": "x", "label": m})
+        xs = [np.mean(list(_per_image(rows, regime, m, c).values())) for c in cats]
+        ax.plot(xs, range(len(cats)), ls="none", color=s["color"], marker=s["marker"], markersize=8,
+                label=s["label"], markeredgecolor=SURFACE, markeredgewidth=1.5, zorder=3)
+    n = len(_per_image(rows, regime, methods[0], cats[0]))
+    ax.set_yticks(range(len(cats)), [c.replace("_", " ") for c in cats])
+    ax.grid(axis="y", visible=False)
+    ax.set_xlabel("PSNR (dB), mean over all patterns and fractions")
+    fig.legend(*ax.get_legend_handles_labels(), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.0))
+    ax.set_title(f"By specimen category — {regime.replace('_', ' ')} ({n} test images per category)",
+                 loc="left", fontsize=11)
+    _save(fig, out)
+
+
+def category_table(rows, regime: str, seed: int = 0) -> str:
+    """Markdown: mean PSNR per category and method, plus the paired U-Net − TV-L2 gain with a 95% CI."""
+    cats, methods = _categories(rows, regime), _methods(rows)
+    label = lambda m: METHOD_STYLE.get(m, {"label": m})["label"]
+    paired = "unet" in methods and "tv_l2" in methods
+    head = ["category", "n"] + [label(m) for m in methods] + (["U-Net − TV-L2"] if paired else [])
+    lines = ["| " + " | ".join(head) + " |", "|---" * len(head) + "|"]
+    for c in cats:
+        per = {m: _per_image(rows, regime, m, c) for m in methods}
+        cells = [c.replace("_", " "), str(len(per[methods[0]]))] + [f"{np.mean(list(per[m].values())):.2f}" for m in methods]
+        if paired:
+            d = np.array([per["unet"][i] - per["tv_l2"][i] for i in per["unet"]])
+            lo, hi = bootstrap_ci(d, seed=seed)
+            cells.append(f"{d.mean():+.2f} [{lo:+.2f}, {hi:+.2f}]")
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def frontier(rows, regime: str) -> dict[str, list[tuple[float, float, str, float]]]:
+    """Per method, the (scan time, PSNR, pattern, frac) points not beaten by any faster configuration."""
+    agg = aggregate(rows, "psnr", regime)
+    out = {}
+    for m in _methods(rows):
+        pts = sorted((t[4], t[1], p, t[0]) for (mm, p), v in agg.items() if mm == m for t in v)
+        best, front = -np.inf, []
+        for t, psnr_, p, fr in pts:
+            if psnr_ > best:
+                best = psnr_
+                front.append((t, psnr_, p, fr))
+        out[m] = front
+    return out
+
+
+def frontier_plot(rows, regime: str, out: Path) -> None:
+    """Best PSNR reachable within a scan-time budget, per method (any pattern, any fraction)."""
+    _style()
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    fronts = frontier(rows, regime)
+    t_max = max(t for pts in fronts.values() for t, *_ in pts)
+    for m, pts in fronts.items():
+        s = METHOD_STYLE.get(m, {"color": INK_MUTED, "marker": "x", "label": m})
+        a = np.array([(t, v) for t, v, _, _ in pts])
+        # hold the last value out to the largest budget: a bigger budget never does worse
+        line = np.vstack([a, [t_max, a[-1, 1]]])
+        ax.step(line[:, 0], line[:, 1], where="post", color=s["color"], lw=2, label=s["label"])
+        ax.plot(a[:, 0], a[:, 1], ls="none", color=s["color"], marker=s["marker"],
+                markeredgecolor=SURFACE, markeredgewidth=1.5)
+    ax.set_xscale("log")
+    ticks = [0.05, 0.1, 0.2, 0.3, 0.5, 1.0]
+    ax.set_xticks(ticks, [f"{t:g}×" for t in ticks])
+    ax.minorticks_off()
+    ax.set_xlabel("scan-time budget (relative to a full raster)")
+    ax.set_ylabel("best PSNR reachable (dB)")
+    fig.legend(*ax.get_legend_handles_labels(), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.0))
+    ax.set_title(f"Best configuration within a scan-time budget — {regime.replace('_', ' ')}",
+                 loc="left", fontsize=11)
+    _save(fig, out)
+
+
+def frontier_table(rows, regime: str, budgets=(0.1, 0.2, 0.3, 0.5, 1.0)) -> str:
+    """Markdown: per method, the best PSNR and the (pattern, fraction, time) achieving it within each budget.
+
+    Budgets get 1% slack: a raster at fraction f takes f plus a little flyback, and should count as f.
+    """
+    short = {"uniform": "uniform", "partial_raster": "raster", "line_hop": "line-hop"}
+    lines = ["| method | " + " | ".join(f"≤ {b:g}×" for b in budgets) + " |",
+             "|---|" + "---|" * len(budgets)]
+    for m, pts in frontier(rows, regime).items():
+        cells = []
+        for b in budgets:
+            ok = [p for p in pts if p[0] <= 1.01 * b]
+            cells.append(f"{ok[-1][1]:.2f} ({short[ok[-1][2]]} {ok[-1][3]:.0%}, {ok[-1][0]:.2f}×)" if ok else "—")
+        lines.append(f"| {METHOD_STYLE.get(m, {'label': m})['label']} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def qualitative(x, recon: dict[str, np.ndarray], y, mask, out: Path, zoom: int = 160) -> None:
     """Row 1: full crops; row 2: top-left zoom. recon maps method -> image."""
     _style()

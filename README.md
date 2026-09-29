@@ -134,8 +134,36 @@ Each image's PSNR difference is averaged over its cases. The interval is a 95% b
 
 ![psnr vs fraction, fixed dwell](results/figures/psnr_vs_frac_fixed_dwell.png)
 ![psnr vs fraction, fixed dose](results/figures/psnr_vs_frac_fixed_dose.png)
-![psnr vs scan time, fixed dwell](results/figures/psnr_vs_time_fixed_dwell.png)
 ![qualitative, line-hop 10%](results/figures/qualitative_line_hop_10pct_fixed_dwell.png)
+
+### Equal scan time
+
+A microscopist cares less about the pixel fraction than about acquisition time. For each method, this is the best PSNR reachable within a scan-time budget, taking the best of the 15 (pattern, fraction) configurations that fit.
+
+![best PSNR within a scan-time budget, fixed dwell](results/figures/psnr_frontier_fixed_dwell.png)
+
+| method (fixed dwell) | ≤ 0.1× | ≤ 0.2× | ≤ 0.3× | ≤ 1× |
+|---|---|---|---|---|
+| Biharmonic | 20.11 (raster 5%) | 20.11 (raster 5%) | 20.11 (raster 5%) | 20.11 (raster 5%) |
+| TV-L2 | 22.77 (raster 10%) | 24.27 (raster 20%) | 25.21 (raster 30%) | 25.21 (raster 30%) |
+| TV-Poisson | 22.59 (raster 10%) | 23.97 (raster 20%) | 24.64 (raster 30%) | 24.64 (raster 30%) |
+| U-Net (uniform-only) | 21.59 (raster 10%) | 23.61 (raster 20%) | 25.47 (raster 30%) | 26.48 (uniform 20%) |
+| **U-Net** | **24.83 (raster 10%)** | **26.32 (raster 20%)** | **27.08 (raster 30%)** | **27.08 (raster 30%)** |
+| Diffusion | 24.41 (raster 10%) | 26.02 (raster 20%) | 26.85 (raster 30%) | 26.85 (raster 30%) |
+
+- **Partial raster is the right choice at every budget up to a full raster, for every method except the uniform-only ablation.** Biharmonic stays at 5%, because more lines only add noise it can't remove.
+- **Past 0.3×, extra time buys almost nothing.** Up to a full raster's time, nothing beats raster at 30%. Only uniform at 30% edges past it, by 0.2 dB, and it takes 1.31×: longer than scanning every pixel.
+- **The uniform-only U-Net is the exception:** from about 0.8× it is best with uniform masks, the only kind it was trained on.
+- **Fixed dose:** partial raster is again the frontier for the U-Net, diffusion and TV-L2. TV-Poisson and the ablation switch to uniform at 5% once the budget reaches 0.34×. `results/summary.md` has the fixed-dose table and each configuration's exact time. `psnr_vs_time_<regime>.png` shows every pattern's curve per method.
+
+### By specimen category
+
+![PSNR by category, fixed dwell](results/figures/psnr_by_category_fixed_dwell.png)
+
+Each category has 10 test images. The ordering holds in all 10 categories and both regimes: U-Net, then diffusion, then the best classical method.
+- **Hardest categories:** fine, dense textures such as porous sponge and coated films (U-Net about 21 dB).
+- **Easiest categories:** isolated objects on smooth backgrounds, such as tips and particles (about 30 dB).
+- **Where the U-Net gains most over TV-L2:** on fibres, +3.2 dB [2.5, 3.9]; the gain is smallest on biological specimens, +1.2 dB [0.9, 1.5]. The table with paired CIs is in `results/summary.md`.
 
 ### Findings
 
@@ -164,7 +192,7 @@ Each image's PSNR difference is averaged over its cases. The interval is a 95% b
   - The λ grid was extended to rule out a tuning artifact.
   - Possible reasons: at these counts the Gaussian approximation is already adequate, and the reference images are themselves noisy JPEGs.
 
-`python scripts/make_figures.py` also writes SSIM and unmeasured-pixel PSNR against fraction (`ssim_vs_frac_<regime>.png`, `psnr_unobserved_vs_frac_<regime>.png`) and the fixed-dose scan-time plot. When the result CSVs cover different image sets, only the shared images are compared.
+`python scripts/make_figures.py` writes every figure for both regimes: PSNR, SSIM and unmeasured-pixel PSNR against fraction (`*_vs_frac_<regime>.png`), PSNR against scan time per method (`psnr_vs_time_<regime>.png`), the scan-time budget frontier (`psnr_frontier_<regime>.png`) and the category breakdown (`psnr_by_category_<regime>.png`). It also writes the tables in `results/summary.md`. When the result CSVs cover different image sets, only the shared images are compared.
 
 ## What this simulation ignores
 

@@ -1,4 +1,4 @@
-from semrecon.plots import matched
+from semrecon.plots import frontier, frontier_table, matched
 
 
 def _row(method, image, pattern="uniform", frac=0.1, regime="fixed_dwell"):
@@ -19,3 +19,17 @@ def test_matched_is_per_case():
     kept, dropped = matched(rows)
     assert dropped == 2
     assert sum(r["pattern"] == "line_hop" for r in kept) == 3
+
+
+def test_frontier_keeps_only_improvements_in_time_order():
+    def r(pattern, frac, t, psnr):
+        return {"method": "unet", "image": 0, "pattern": pattern, "frac": frac, "regime": "fixed_dwell",
+                "psnr": psnr, "scan_time_rel": t}
+
+    rows = [r("partial_raster", 0.1, 0.101, 24.0), r("partial_raster", 0.3, 0.301, 26.0),
+            r("uniform", 0.05, 0.34, 25.0),  # slower and worse than raster 30%: not on the frontier
+            r("uniform", 0.3, 1.31, 26.5)]
+    pts = frontier(rows, "fixed_dwell")["unet"]
+    assert [(p[2], p[3]) for p in pts] == [("partial_raster", 0.1), ("partial_raster", 0.3), ("uniform", 0.3)]
+    table = frontier_table(rows, "fixed_dwell", budgets=(0.1, 0.3, 1.0))
+    assert "24.00 (raster 10%" in table and "26.00 (raster 30%" in table  # 1% budget slack

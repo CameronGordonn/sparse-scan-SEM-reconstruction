@@ -54,9 +54,20 @@ def curves(args):
         for metric in ("psnr", "ssim", "psnr_unobserved"):
             plots.metric_vs_frac(rows, metric, regime, args.out / f"{metric}_vs_frac_{regime}.png")
         plots.metric_vs_time(rows, "psnr", regime, args.out / f"psnr_vs_time_{regime}.png")
+        plots.frontier_plot(rows, regime, args.out / f"psnr_frontier_{regime}.png")
+        plots.category_dots(rows, regime, args.out / f"psnr_by_category_{regime}.png")
+        name = regime.replace("_", " ")
         for metric in ("psnr", "ssim"):
-            md.append(f"### {metric.upper()} at {args.table_frac:.0%} sampling, {regime.replace('_', ' ')}\n")
+            md.append(f"### {metric.upper()} at {args.table_frac:.0%} sampling, {name}\n")
             md.append(plots.summary_table(rows, regime, args.table_frac, metric) + "\n")
+        md.append(f"### Best PSNR within a scan-time budget, {name}\n\n"
+                  "Best (pattern, fraction) whose scan time, relative to a full raster, fits the budget (1% slack); "
+                  "each cell also shows that configuration's actual time.\n")
+        md.append(plots.frontier_table(rows, regime) + "\n")
+        md.append(f"### PSNR by specimen category, {name}\n\n"
+                  "Mean over all patterns and fractions. Hardest category first, by U-Net PSNR. "
+                  "The last column is the paired U-Net − TV-L2 gain with a 95% bootstrap CI over images.\n")
+        md.append(plots.category_table(rows, regime) + "\n")
     (args.out.parent / "summary.md").write_text("\n".join(md))
     print(f"curves for {regimes} from {[str(p) for p in paths]}")
 
