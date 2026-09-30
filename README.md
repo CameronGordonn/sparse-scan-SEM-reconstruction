@@ -203,6 +203,36 @@ The main evaluation assumes the beam lands exactly where it is sent. Real deflec
 
 `results/jitter/summary.md` has all three methods; the raw rows are in `results/jitter/metrics_*.csv`.
 
+### What diffusion offers beyond PSNR
+
+PSNR rewards the conditional mean, which the U-Net predicts directly, so the main tables can't show what a sampler adds. `scripts/diffusion_analysis.py` draws **16 samples** per case on the first 20 test images. Each image is run for all three patterns at 10% and 30% (fixed dwell), 120 cases in all. From those samples it measures three things:
+- PSNR as a function of how many samples are averaged;
+- how much real texture survives, as power in the 0.15–0.5 × Nyquist band relative to the ground truth, plus LPIPS;
+- whether the spread across samples predicts where the mean is wrong.
+
+![ensemble size](results/figures/diffusion_ensemble.png)
+
+| | U-Net | diffusion, 1 sample | 4-sample mean | 16-sample mean |
+|---|---|---|---|---|
+| PSNR (dB) | 24.06 | 22.72 | 23.78 | 24.10 |
+| mid-band texture power (1 = truth) | 0.53 | 0.62 | — | 0.38 |
+| LPIPS (lower is closer) | 0.427 | 0.482 | — | 0.546 |
+
+- **Averaging 16 samples closes the PSNR gap to the U-Net entirely.** The difference is +0.04 dB, with a paired 95% CI over images of [−0.06, +0.16], so it's a statistical tie. The 16-sample mean is slightly ahead at 30% sampling (25.20 vs 25.04 dB) and slightly behind at 10% (23.00 vs 23.08). The 4-sample mean used in the main evaluation trails by 0.28 dB [0.17, 0.36]. The tie costs 16 × 100 network evaluations, about 19 s per crop on an A100, against 0.03 s for the U-Net.
+- **A single sample keeps more fine structure than the U-Net, but not the right structure.** It keeps 0.62 of the true mid-band power against 0.53, more on 75% of images, and averaging washes that out to 0.38. But its LPIPS is still worse than the U-Net's, which is perceptually closer on 65% of images. The extra texture is plausible, not faithful. A single sample does beat the ensemble mean on LPIPS for every image.
+
+![texture](results/figures/diffusion_texture.png)
+
+- **The sample spread is a weak but real error map, and it's overconfident.**
+  - Rank correlation between per-pixel std and |error| on unmeasured pixels is 0.29.
+  - Discarding the most uncertain pixels removes about 35% of what an oracle that knows the errors would remove: AUSE 0.028, against 0.043 for a random ranking.
+  - The spread under-states the actual error by about 1.7× (mean std 0.045 vs RMSE 0.077), consistently across the calibration bins. Part of the gap is the reference's own shot noise and JPEG grain, which no reconstruction can predict. The |error| panel below is dominated by it.
+
+![uncertainty](results/figures/diffusion_uncertainty.png)
+![example](results/figures/diffusion_example.png)
+
+`results/diffusion_analysis/summary.md` has the per-pattern tables, and `cases.csv` the per-case values.
+
 ### Findings
 
 - **The U-Net is best in every one of the 30 cases, in both regimes.**
@@ -211,7 +241,7 @@ The main evaluation assumes the beam lands exactly where it is sent. Real deflec
 - **Diffusion comes second, but it doesn't beat the direct regressor on these metrics.**
   - It trails the U-Net by 0.37–0.41 dB and is worse on 98–99% of images.
   - It takes 4.8 s per crop: 4 samples × 100 DDIM steps.
-  - PSNR and SSIM reward the conditional mean, which is exactly what the U-Net is trained to predict. Even a 4-sample ensemble mean only approaches it.
+  - PSNR and SSIM reward the conditional mean, which is exactly what the U-Net is trained to predict. A 4-sample ensemble mean only approaches it; averaging 16 samples ties it, at 4× the cost again (see *What diffusion offers beyond PSNR*).
   - Enforcing the measurements during sampling hurts badly, by about 5 dB on val. The observations carry Poisson noise, so pasting them back in, clean or re-noised, injects that noise.
 - **Training on scan-feasible patterns matters.**
   - The uniform-only ablation nearly matches the U-Net on uniform masks, trailing by only 0.2 dB.
@@ -286,6 +316,11 @@ python scripts/coil_errors.py --methods unet --unet-ckpt checkpoints/unet/best.p
 python scripts/coil_errors.py --methods unet --unet-ckpt checkpoints/unet_uniform_only/best.pt \
     --method-name unet_uniform_only --out results/jitter/metrics_unet_uniform_only.csv
 python scripts/coil_errors.py --stage plot
+
+# diffusion beyond PSNR: 16 samples per case on 20 images (GPU, ~45 min on an A100; pip install lpips for LPIPS)
+python scripts/diffusion_analysis.py --stage run --out /tmp/da --unet-ckpt checkpoints/unet/best.pt \
+    --diffusion-ckpt checkpoints/diffusion/best.pt --device cuda
+python scripts/diffusion_analysis.py --stage plot --chunks /tmp/da --out results/diffusion_analysis
 ```
 
 - **Colab:** `colab/train.ipynb` keeps the dataset tars, splits, eval sets, checkpoints and results on Drive, and extracts the images to local disk each session. Run it cell by cell, or run its last section to launch `colab/launch_all.sh`, which trains and evaluates every learned model unattended in two parallel lanes on one GPU.
@@ -299,7 +334,8 @@ src/semrecon/  data, forward, patterns, coils, metrics, uncertainty, evaluate, p
 scripts/       prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures,
                coil_errors, diffusion_analysis
 configs/       eval.yaml, unet.yaml, diffusion.yaml, *smoke.yaml
-results/       metrics*.csv, tv_lambdas.json, summary.md, figures/
+results/       metrics*.csv, tv_lambdas.json, summary.md, figures/, jitter/, diffusion_analysis/
+docs/          results-explained.pdf (plain-language write-up)
 colab/ hpc/ tests/
 ```
 
