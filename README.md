@@ -12,6 +12,7 @@ What sets it apart from a generic inpainting benchmark:
 
 - **Physically motivated measurements.** Shot noise is Poisson and scales with dwell time. Sampling patterns respect what scan coils can do: the beam cannot jump anywhere instantly, so full and partial raster lines are compared against the usual uniform-random pixels. A scan-time model charges for every settle and flyback, so methods are compared at equal *acquisition time* as well as at equal pixel count.
 - **Classical solvers written from scratch.** Biharmonic interpolation uses its own sparse solve. TV inpainting has two solvers, Chambolle–Pock primal-dual and ADMM, and two data terms, least squares and the Poisson likelihood. All are checked against scikit-image.
+- **Checked on real scans.** Real partial-raster scans from a PFIB-SEM test the noise model and the models' transfer (see [Real SEM data](#real-sem-data)).
 - **Learned models.** A U-Net conditioned on the sampling mask is trained across fractions, patterns and doses. A conditional diffusion model is adapted from [diffusion-sparse-reconstruction-hpc](https://github.com/CameronGordonn/diffusion-sparse-reconstruction-hpc).
 
 ## Data
@@ -262,6 +263,55 @@ PSNR rewards the conditional mean, which the U-Net predicts directly, so the mai
 
 `python scripts/make_figures.py` writes every figure for both regimes: PSNR, SSIM and unmeasured-pixel PSNR against fraction (`*_vs_frac_<regime>.png`), PSNR against scan time per method (`psnr_vs_time_<regime>.png`), the scan-time budget frontier (`psnr_frontier_<regime>.png`) and the category breakdown (`psnr_by_category_<regime>.png`). It also writes the tables in `results/summary.md`. When the result CSVs cover different image sets, only the shared images are compared.
 
+## Real SEM data
+
+Everything above is simulated. `scripts/real_data.py` checks the two assumptions that matter most, the noise model and whether the models transfer, on real sparse scans.
+
+**Data.** B. Chen, F. Wang, H. Wang, Y. Zhang, Z. Zhao, H. Chen, H. Han, X. Chen, Y. Hua, dataset of *Volumetric denoising enables efficient acquisition of volume electron microscopy*, Zenodo [10.5281/zenodo.20139642](https://doi.org/10.5281/zenodo.20139642) (2026), licensed **CC-BY-4.0**; preprint [10.1101/2025.08.26.672334](https://doi.org/10.1101/2025.08.26.672334).
+- PFIB-SEM of mouse brain, 5 nm voxels, Zeiss Gemini 300.
+- An aligned pair: a 0.5 µs scan and a 2 µs reference of the same 1300² × 181 volume.
+- A dwell series: the same 2048² × 332 volume at 0.25, 0.5, 0.75, 1, 1.5 and 2 µs.
+
+Stained brain tissue looks nothing like the NFFA training images, so the models run out of distribution here. They were not retrained.
+
+**Measuring noise.** Adjacent 5 nm slices show nearly the same structure, so their difference is mostly noise. Their signal-to-noise power ratio (SNR) doesn't depend on brightness or contrast settings, and for pure shot noise it is proportional to dwell.
+
+**A real sparse scan.** Dropping lines from a real 0.5 µs scan *is* a real partial-raster acquisition: same detector, same noise, fewer lines. Each reconstruction is scored against the 2 µs reference, after the best affine brightness/contrast map on unsaturated pixels (20 slices, 512² crops). A *simulated twin* of every case replaces the real noise with this repo's Poisson model at the same noise power. Its clean image is the adjacent reference slice, so the reference's own noise can't leak into the twin.
+
+![noise vs dwell and noise spectrum](results/figures/real_noise.png)
+
+![real partial raster vs simulated twin](results/figures/real_recon.png)
+
+![one real slice at 20% of lines](results/figures/real_example.png)
+
+![equal scan time on real data](results/figures/real_budget.png)
+
+Tables: [`results/real_data/summary.md`](results/real_data/summary.md). Paired differences below are means over the 20 slices, with 95% bootstrap intervals.
+
+### Findings on real data
+
+- **Real noise is not Poisson below 1 µs.**
+  - SNR rises from 0.11 at 0.25 µs to 5.58 at 2 µs. Between 1 and 2 µs it scales like shot noise (local exponents 1.11 and 1.07).
+  - Below 1 µs it's much steeper (exponents 2.07 and 1.45). Between 0.75 and 1 µs it jumps with exponent 3.97, which looks like a change in detector settings.
+  - On the aligned pair, 4× the dwell gives 12.9× the SNR (IQR 12.5–13.4 over 30 slices), not 4×.
+  - Below 1 µs the noise is anti-correlated along the scan rows (lag-1 correlation −0.22 to −0.31): blue along the rows, white across them. From 1 µs up it's roughly white, apart from the lowest frequency band, where real structure change between slices likely leaks into the difference.
+  - The real 0.5 µs scan has the noise power of Poisson noise at about 22.6 electrons per pixel.
+- **The simulation overrates the U-Net on short-dwell data.**
+  - On the real 0.5 µs partial raster, the U-Net scores 1.07, 1.88 and 2.28 dB below its simulated twin at 10, 20 and 30% of lines. It's worse on every slice, and all intervals are within ±0.11 dB.
+  - TV-L2 does 0.31–0.55 dB *better* on real noise than on the twin. The twin carries a small handicap, because its clean image is a neighbouring slice. The U-Net's real-data loss is therefore, if anything, understated.
+  - On real noise TV-L2 beats the U-Net at 20% (+0.47 dB) and 30% (+1.55 dB). The U-Net edges ahead only at 10% (by 0.21 dB). On the twin, the U-Net beats TV-L2 by 1.3–1.8 dB.
+  - The U-Net leaves horizontal stripes on real data (see the example). Likely cause: it was trained on white Poisson noise, and this noise is coloured along the rows.
+  - Every sparse option loses to scanning all lines: the full 0.5 µs scan scores 14.47 dB raw and 20.26 dB after TV-L2 denoising, against at best 18.30 dB for 30% of lines.
+- **At equal scan time, the U-Net pays off on long-dwell data, and no single rule wins.** Each budget buys all lines at 0.5 µs, half the lines at 1 µs, or a quarter at 2 µs, and so on. The reference is the mean of the neighbouring 2 µs slices. TV-L2's strength was tuned per option on held-out slices, and no tuned value lies at the edge of its grid.
+  - At 1× (the time of one full 0.5 µs scan), the U-Net on 2 µs / 25% of lines beats TV-L2 on the full 0.5 µs scan by +0.54 dB [+0.33, +0.74], on 90% of slices. TV-L2 on the same 2 µs data only ties the full scan (+0.10 [−0.07, +0.25]).
+  - At 0.5×, TV-L2 on 0.5 µs / 50% of lines beats the U-Net on 2 µs / 12.5% by +0.52 dB [+0.40, +0.64].
+  - At 0.25×, the U-Net on 1 µs / 12.5% ties TV-L2 on 0.5 µs / 25% (+0.04 [−0.13, +0.19]).
+  - U-Net minus TV-L2 on the same data is +0.39 to +0.53 dB on 2 µs data, where the noise is nearly white, and positive on every slice. It falls to +0.06 and −0.65 dB on 1 µs data and −1.18 dB on 0.5 µs data (within the U-Net's 5–30% training range).
+  - The U-Net works on real data when the real noise resembles its training noise, and fails when it doesn't.
+- **Caveats.** It's one specimen, one microscope and 20 slices. The 2 µs options are scored against other slices of the same 2 µs stack, which shares their detector settings; anything systematic those settings add would favour them.
+
+`python scripts/real_data.py --help` describes the stages; see *Reproduce*. The data, about 9 GB, is not in this repo.
+
 ## What this simulation ignores
 
 - **Scan-coil dynamics.** The main evaluation reduces hysteresis, overshoot and settling to one constant settle time per jump. [Scan-coil position errors](#scan-coil-position-errors) adds a simple overshoot model as a sensitivity analysis. It still ignores hysteresis, a dependence on jump length, and slow-axis errors, and it is not calibrated against a real microscope.
@@ -272,6 +322,8 @@ PSNR rewards the conditional mean, which the U-Net predicts directly, so the mai
   - detector bandwidth and the resulting blur along the scan;
   - the beam's point-spread function;
   - quantisation, and offset/gain drift.
+
+  [Real SEM data](#real-sem-data) measures what this costs on one real microscope. Below 1 µs dwell the real noise grows much faster than shot noise as dwell shrinks, and it is coloured along the scan rows. The U-Net, trained on white Poisson noise, then loses 1–2.3 dB against its simulated twin and leaves stripes.
 - **Ground truth is not truth.** The "clean" images are themselves noisy, JPEG-compressed acquisitions. Metrics measure agreement with another noisy image, and the learned models partly learn JPEG artifacts.
 
 ## Pretrained weights
@@ -309,7 +361,7 @@ Options:
 
 The U-Net takes a few seconds per image on a CPU; diffusion (`--methods diffusion`) takes minutes on a CPU and seconds on a GPU.
 
-The models only know the NFFA training distribution: 10 SEM categories, secondary-electron contrast, and noise up to the trained dose range. Expect them to degrade on very different imagery, such as backscatter or inverted-contrast biological sections, and on coils that land imprecisely (see *Scan-coil position errors*).
+The models only know the NFFA training distribution: 10 SEM categories, secondary-electron contrast, and noise up to the trained dose range. Expect them to degrade on very different imagery, such as backscatter or inverted-contrast biological sections, and on coils that land imprecisely (see *Scan-coil position errors*). On real short-dwell scans with coloured noise it loses to TV-L2 (see *Real SEM data*).
 
 ## Reproduce
 
@@ -347,6 +399,12 @@ python scripts/coil_errors.py --stage plot
 python scripts/diffusion_analysis.py --stage run --out /tmp/da --unet-ckpt checkpoints/unet/best.pt \
     --diffusion-ckpt checkpoints/diffusion/best.pt --device cuda
 python scripts/diffusion_analysis.py --stage plot --chunks /tmp/da --out results/diffusion_analysis
+
+# real SEM data (CPU): download the Zenodo 10.5281/zenodo.20139642 TIFF stacks (~9 GB) into data/zenodo_20139642/
+python scripts/real_data.py --stage noise     # SNR vs dwell, noise spectrum
+python scripts/real_data.py --stage recon     # real 0.5 us partial raster vs simulated twin
+python scripts/real_data.py --stage budget    # equal scan time across dwells (~30 min with 5 workers)
+python scripts/real_data.py --stage plot
 ```
 
 - **Colab:** `colab/train.ipynb` keeps the dataset tars, splits, eval sets, checkpoints and results on Drive, and extracts the images to local disk each session. Run it cell by cell, or run its last section to launch `colab/launch_all.sh`, which trains and evaluates every learned model unattended in two parallel lanes on one GPU.
@@ -355,16 +413,16 @@ python scripts/diffusion_analysis.py --stage plot --chunks /tmp/da --out results
 ## Layout
 
 ```
-src/semrecon/  data, forward, patterns, coils, metrics, uncertainty, evaluate, plots, train_unet, train_diffusion
+src/semrecon/  data, forward, patterns, coils, metrics, noise, uncertainty, evaluate, plots, train_unet, train_diffusion
                baselines/{biharmonic,tv}.py   models/{unet,diffusion}.py
 scripts/       reconstruct (try it), prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures,
-               coil_errors, diffusion_analysis
+               coil_errors, diffusion_analysis, real_data
 configs/       eval.yaml, unet.yaml, diffusion.yaml, *smoke.yaml
-results/       metrics*.csv, tv_lambdas.json, summary.md, figures/, jitter/, diffusion_analysis/
+results/       metrics*.csv, tv_lambdas.json, summary.md, figures/, jitter/, diffusion_analysis/, real_data/
 docs/          results-explained.pdf (plain-language write-up)
 colab/ hpc/ tests/
 ```
 
 ## License
 
-The code and the trained model weights are released under the [Apache License 2.0](LICENSE). The NFFA-Europe SEM dataset is © CNR-IOM and licensed [CC-BY](https://doi.org/10.23728/b2share.80df8606fcdb4b2bae1656f0dc6db8ba). It is not redistributed here; `scripts/prepare_data.py` downloads it from B2SHARE.
+The code and the trained model weights are released under the [Apache License 2.0](LICENSE). The NFFA-Europe SEM dataset is © CNR-IOM and licensed [CC-BY](https://doi.org/10.23728/b2share.80df8606fcdb4b2bae1656f0dc6db8ba). It is not redistributed here; `scripts/prepare_data.py` downloads it from B2SHARE. The real PFIB-SEM data (Chen et al., Zenodo [10.5281/zenodo.20139642](https://doi.org/10.5281/zenodo.20139642)) is licensed CC-BY-4.0 and is not redistributed either.

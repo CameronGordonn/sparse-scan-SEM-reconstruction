@@ -517,3 +517,171 @@ def coil_error_table(rows) -> str:
     n = len({r["image"] for r in rows})
     return (f"PSNR (dB) on {n} test images, fixed dwell (D = 20). Δ is the paired change from A = 0.\n\n"
             + "\n".join(lines) + "\n")
+
+
+# ------------------------------------------------ real data (scripts/real_data.py)
+
+DWELL_RAMP = ["#b7d3e9", "#86b4dc", "#5a93c9", "#3673b0", "#1c548f", "#0c3a6b"]  # sequential, light -> dark
+
+
+def real_data_figures(noise, recon, examples, out: Path) -> str:
+    _style()
+    out = Path(out)
+    md = []
+    f = lambda rows, k: np.array([float(r[k]) for r in rows])
+    if noise:
+        dwells = sorted({float(r["dwell_us"]) for r in noise})
+        med = {d: np.median(f([r for r in noise if float(r["dwell_us"]) == d], "snr")) for d in dwells}
+        q = {d: np.percentile(f([r for r in noise if float(r["dwell_us"]) == d], "snr"), [25, 75]) for d in dwells}
+        slope, icpt = np.polyfit(np.log(dwells), np.log([med[d] for d in dwells]), 1)
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+        ax = axes[0]
+        dl = np.array(dwells)
+        ax.plot(dl, [med[d] for d in dwells], color=INK, marker="o", lw=0, label="measured (median over slices)")
+        ax.vlines(dl, [q[d][0] for d in dwells], [q[d][1] for d in dwells], color=INK, lw=1.5)
+        ax.plot(dl, np.exp(icpt) * dl**slope, color=INK, lw=1.2, label=f"fit: SNR ∝ dwell^{slope:.2f}")
+        anchor = med[dwells[-1]] / dwells[-1]
+        ax.plot(dl, anchor * dl, color=METHOD_STYLE["tv_l2"]["color"], ls="--", lw=1.5,
+                label="shot noise only: SNR ∝ dwell")
+        ax.set_xscale("log"), ax.set_yscale("log")
+        ax.set_xticks(dl, [f"{d:g}" for d in dl]), ax.minorticks_off()
+        ax.set_xlabel("pixel dwell time (µs)")
+        ax.set_ylabel("signal-to-noise power ratio")
+        ax.set_title("Noise vs dwell time (real PFIB-SEM data)", loc="left", fontsize=11)
+        ax.legend(loc="lower right")
+        ax = axes[1]
+        bands = [k for k in noise[0] if k.startswith("band")]
+        x = (np.arange(len(bands)) + 0.5) / len(bands)
+        for d, col in zip(dwells, DWELL_RAMP[-len(dwells):]):
+            rs = [r for r in noise if float(r["dwell_us"]) == d]
+            ax.plot(x, [np.mean(f(rs, b)) for b in bands], color=col, marker="o", markeredgecolor=SURFACE,
+                    label=f"{d:g} µs")
+        ax.axhline(1, color=INK_MUTED, ls="--", lw=1)
+        ax.set_xlabel("frequency along the scan line (fraction of Nyquist)")
+        ax.set_ylabel("noise power (mean = 1; white noise = flat)")
+        ax.set_title("Noise spectrum along the fast-scan direction", loc="left", fontsize=11)
+        ax.legend(loc="upper left", ncol=2, title="dwell")
+        _save(fig, out / "real_noise.png")
+        md += ["### Noise vs dwell time\n", "| dwell (µs) | SNR median [IQR] | noise corr. along rows | across rows |",
+               "|---|---|---|---|"]
+        for d in dwells:
+            rs = [r for r in noise if float(r["dwell_us"]) == d]
+            md.append(f"| {d:g} | {med[d]:.3f} [{q[d][0]:.3f}, {q[d][1]:.3f}] | {np.mean(f(rs, 'corr_along')):+.2f} | "
+                      f"{np.mean(f(rs, 'corr_across')):+.2f} |")
+        steps = [f"{d0:g}→{d1:g} µs: {np.log(med[d1] / med[d0]) / np.log(d1 / d0):.2f}" for d0, d1 in zip(dwells, dwells[1:])]
+        md.append(f"\nPower-law fit over all dwells: SNR ∝ dwell^{slope:.2f}; shot noise alone gives exponent 1. "
+                  f"Local exponents between neighbouring dwells: {'; '.join(steps)}.\n")
+
+    # reconstruction from real partial-raster scans
+    methods = ["biharmonic", "tv_l2", "unet"]
+    fracs = sorted({float(r["frac"]) for r in recon if float(r["frac"]) < 1})
+    fig, ax = plt.subplots(figsize=(7.5, 4.3))
+    for m in methods:
+        s = METHOD_STYLE[m]
+        for src, ls in (("real", "-"), ("simulated", "--")):
+            ys = [np.mean(f([r for r in recon if r["method"] == m and r["source"] == src and float(r["frac"]) == fr], "psnr"))
+                  for fr in fracs]
+            ax.plot(fracs, ys, color=s["color"], ls=ls, marker=s["marker"], markeredgecolor=SURFACE,
+                    label=f"{s['label']}, {'real noise' if src == 'real' else 'simulated twin'}")
+    for base, col in (("full fast scan", INK_MUTED), ("full fast scan + TV-L2", INK)):
+        for src, ls in (("real", "-"), ("simulated", "--")):
+            rs = [r for r in recon if r["method"] == base and r["source"] == src]
+            if rs:
+                lab = "all lines, raw" if base == "full fast scan" else "all lines, TV-L2 denoised"
+                ax.axhline(np.mean(f(rs, "psnr")), color=col, ls=ls, lw=1.2,
+                           label=f"{lab}, {'real noise' if src == 'real' else 'simulated twin'}")
+    ax.set_xticks(fracs, [f"{fr:.0%}" for fr in fracs])
+    ax.set_xlabel("lines scanned (= scan time relative to the full scan)")
+    ax.set_ylabel("PSNR vs 2 µs reference (dB, affine-matched)")
+    ax.set_title("Real partial-raster scans (0.5 µs dwell)", loc="left", fontsize=11)
+    fig.legend(*ax.get_legend_handles_labels(), loc="upper center", ncol=2, bbox_to_anchor=(0.5, 0.0))
+    _save(fig, out / "real_recon.png")
+    md += ["### Real partial-raster reconstruction\n",
+           "PSNR against the 2 µs reference after the best affine brightness/contrast map (unsaturated pixels). "
+           "'Simulated' replaces the real noise by Poisson noise of the same power.\n",
+           "| method | source | " + " | ".join(f"{fr:.0%} lines" for fr in fracs) + " |", "|---|---|" + "---|" * len(fracs)]
+    for m in methods:
+        for src in ("real", "simulated"):
+            md.append(f"| {METHOD_STYLE[m]['label']} | {src} | " + " | ".join(
+                f"{np.mean(f([r for r in recon if r['method'] == m and r['source'] == src and float(r['frac']) == fr], 'psnr')):.2f}"
+                for fr in fracs) + " |")
+    for base in ("full fast scan", "full fast scan + TV-L2"):
+        for src in ("real", "simulated"):
+            rs = [r for r in recon if r["method"] == base and r["source"] == src]
+            if rs:
+                md.append(f"| all lines{' + TV-L2' if 'TV' in base else ', raw'} | {src} | "
+                          + " | ".join([f"{np.mean(f(rs, 'psnr')):.2f} (100% of lines)"] + [""] * (len(fracs) - 1)) + " |")
+    md.append(f"\nEquivalent Poisson dose of the real 0.5 µs scan: "
+              f"{np.median(f([r for r in recon if r['method'] == 'full fast scan'], 'dose_eq')):.1f} electrons per pixel "
+              f"at mean brightness ({len({r['slice'] for r in recon})} slices, 512×512 centre crops).\n")
+
+    if "real" in examples:
+        e = examples["real"]
+        panels = [("full 0.5 µs scan", e["fast"]), ("2 µs reference", e["ref"]), ("20% of lines measured", e["y"])]
+        panels += [(METHOD_STYLE[m]["label"], e[m]) for m in methods if m in e]
+        fig, axes = plt.subplots(1, len(panels), figsize=(2.5 * len(panels), 2.9))
+        for ax, (t, im) in zip(axes, panels):
+            ax.imshow(im[:256, :256], cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+            ax.set_title(t, fontsize=9, loc="left")
+            ax.set_xticks([]), ax.set_yticks([])
+            ax.grid(False)
+        _save(fig, out / "real_example.png")
+    return "\n".join(md) + "\n"
+
+
+def real_budget_figure(rows, out: Path) -> str:
+    """Equal scan time on real data: per method, PSNR vs budget with one line per dwell time."""
+    _style()
+    f = lambda rs: float(np.mean([float(r["psnr"]) for r in rs])) if rs else float("nan")
+    budgets = sorted({round(float(r["time"]), 4) for r in rows})
+    dwells = sorted({float(r["dwell_us"]) for r in rows})
+    ramp = DWELL_RAMP[1::2][: len(dwells)] if len(dwells) <= 3 else DWELL_RAMP[-len(dwells):]
+    methods = [m for m in ("tv_l2", "unet", "biharmonic") if any(r["method"] == m for r in rows)]
+    fig, axes = plt.subplots(1, len(methods), figsize=(4.2 * len(methods), 4), sharey=True, squeeze=False)
+    for ax, m in zip(axes[0], methods):
+        for d, col, mk in zip(dwells, ramp, ("o", "s", "D")):
+            pts = []
+            for b in budgets:
+                rs = [r for r in rows if r["method"] == m and float(r["dwell_us"]) == d and round(float(r["time"]), 4) == b]
+                if rs:
+                    pts.append((b, f(rs), float(rs[0]["frac"]), str(rs[0].get("outside_training")) == "True"))
+            if not pts:
+                continue
+            a = np.array([(b, v) for b, v, *_ in pts])
+            ax.plot(a[:, 0], a[:, 1], color=col, lw=2, label=f"{d:g} µs dwell")
+            for b, v, fr, ood in pts:
+                ax.plot(b, v, marker=mk, color=col, markersize=8, markeredgecolor=col if ood else SURFACE,
+                        markerfacecolor=SURFACE if ood else col, markeredgewidth=1.5)
+        raw = [r for r in rows if r["method"] == "raw"]
+        if raw:
+            ax.plot(1.0, f(raw), marker="x", color=INK_MUTED, markersize=8, lw=0, label="0.5 µs, all lines, raw")
+        ax.set_xscale("log", base=2)
+        ax.set_xticks(budgets, [f"{b:g}×" for b in budgets]), ax.minorticks_off()
+        ax.set_xlabel("time budget (full scans at 0.5 µs)")
+        ax.set_title(METHOD_STYLE[m]["label"], loc="left", fontsize=11)
+    axes[0, 0].set_ylabel("PSNR vs reference (dB, affine-matched)")
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="upper center", ncol=4, bbox_to_anchor=(0.5, 0.0))
+    fig.suptitle("Same time budget, real data: all lines fast, or fewer lines slowly? "
+                 "(hollow: U-Net outside its 5-30% training range)", x=0.01, ha="left", fontsize=10, color=INK)
+    _save(fig, out / "real_budget.png")
+    md = ["### Equal scan time on real data\n",
+          "Each budget buys all lines at 0.5 µs, half the lines at 1 µs, or a quarter at 2 µs (and so on). "
+          "PSNR against the mean of the neighbouring 2 µs slices, affine-matched. TV-L2 strength tuned per option "
+          "on held-out slices. † U-Net outside its training range (> 30% of lines).\n",
+          "| budget | option | " + " | ".join(METHOD_STYLE[m]["label"] for m in methods) + " | raw |",
+          "|---|---|" + "---|" * (len(methods) + 1)]
+    for b in budgets:
+        for d in dwells:
+            rs = [r for r in rows if float(r["dwell_us"]) == d and round(float(r["time"]), 4) == b]
+            if not rs:
+                continue
+            fr = float(rs[0]["frac"])
+            cells = []
+            for m in methods:
+                mr = [r for r in rs if r["method"] == m]
+                dag = "†" if mr and str(mr[0].get("outside_training")) == "True" else ""
+                cells.append(f"{f(mr):.2f}{dag}" if mr else "—")
+            raw = [r for r in rs if r["method"] == "raw"]
+            md.append(f"| {b:g}× | {d:g} µs, {fr:.4g} of lines | " + " | ".join(cells) + f" | {f(raw):.2f} |" if raw
+                      else f"| {b:g}× | {d:g} µs, {fr:.4g} of lines | " + " | ".join(cells) + " | — |")
+    return "\n".join(md) + "\n"
