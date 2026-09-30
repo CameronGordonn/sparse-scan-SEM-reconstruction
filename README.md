@@ -285,6 +285,32 @@ for m in unet unet_uniform_only diffusion; do
 done
 ```
 
+## Try it on your own image
+
+`scripts/reconstruct.py` needs only an image. It downloads the released weights on first use and checks their sha256.
+
+```bash
+# simulate a sparse scan of a full image and compare methods (scores printed and drawn)
+python scripts/reconstruct.py my_image.tif --pattern partial_raster --frac 0.2 --methods biharmonic tv_l2 unet
+
+# reconstruct a real sparse scan: the measured image plus a mask whose non-zero pixels were measured
+python scripts/reconstruct.py measured.png --mask mask.png --methods unet --save-recon
+```
+
+![example on a test-set fibre image](results/figures/reconstruct_example.png)
+
+This example is a test-set fibre image, scanned at 20% of the lines in 0.20× the time of a full raster.
+
+Options:
+- `--dose` and `--regime` set the simulated shot noise; `--dose inf` means no noise.
+- `--crop-banner` removes a Zeiss info bar.
+- Images wider than 1024 px are shrunk to the pixel scale the models were trained on.
+- 16-bit TIFFs are scaled by their own range.
+
+The U-Net takes a few seconds per image on a CPU; diffusion (`--methods diffusion`) takes minutes on a CPU and seconds on a GPU.
+
+The models only know the NFFA training distribution: 10 SEM categories, secondary-electron contrast, and noise up to the trained dose range. Expect them to degrade on very different imagery, such as backscatter or inverted-contrast biological sections, and on coils that land imprecisely (see *Scan-coil position errors*).
+
 ## Reproduce
 
 ```bash
@@ -331,7 +357,7 @@ python scripts/diffusion_analysis.py --stage plot --chunks /tmp/da --out results
 ```
 src/semrecon/  data, forward, patterns, coils, metrics, uncertainty, evaluate, plots, train_unet, train_diffusion
                baselines/{biharmonic,tv}.py   models/{unet,diffusion}.py
-scripts/       prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures,
+scripts/       reconstruct (try it), prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures,
                coil_errors, diffusion_analysis
 configs/       eval.yaml, unet.yaml, diffusion.yaml, *smoke.yaml
 results/       metrics*.csv, tv_lambdas.json, summary.md, figures/, jitter/, diffusion_analysis/
