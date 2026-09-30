@@ -454,3 +454,66 @@ def diffusion_analysis_tables(rows, ensemble) -> str:
             md.append(f"| {PATTERN_STYLE.get(p, {'label': 'all'})['label']} | {nan(col(rs, 'spearman_std_err')):.2f} | "
                       f"{nan(col(rs, 'ause')):.4f} | {nan(col(rs, 'ause_random')):.4f} |")
     return "\n".join(md) + "\n"
+
+
+# ------------------------------------------------ scan-coil landing errors (scripts/coil_errors.py)
+
+def _coil_means(rows):
+    g = defaultdict(list)
+    for r in rows:
+        g[(r["method"], r["pattern"], r["frac"], r["amp"])].append(r["psnr"])
+    return {k: float(np.mean(v)) for k, v in g.items()}
+
+
+def coil_error_figure(rows, out: Path) -> None:
+    """PSNR vs landing-error amplitude: rows = sampling fraction, columns = pattern, lines = method."""
+    _style()
+    means = _coil_means(rows)
+    methods, fracs = _methods(rows), sorted({r["frac"] for r in rows})
+    amps = sorted({r["amp"] for r in rows})
+    fig, axes = plt.subplots(len(fracs), 3, figsize=(12, 3.3 * len(fracs)), sharex=True, sharey="row",
+                             squeeze=False)
+    for i, fr in enumerate(fracs):
+        for j, p in enumerate(PATTERN_ORDER):
+            ax = axes[i, j]
+            for m in methods:
+                ys = [means.get((m, p, fr, a)) for a in amps]
+                if None in ys:
+                    continue
+                s = METHOD_STYLE.get(m, {"color": INK_MUTED, "marker": "x", "label": m})
+                ax.plot(amps, ys, color=s["color"], marker=s["marker"], label=s["label"],
+                        markeredgecolor=SURFACE, markeredgewidth=1.5)
+            ax.set_title(f"{PATTERN_STYLE[p]['label']}, {fr:.0%}", loc="left", fontsize=11)
+            if i == len(fracs) - 1:
+                ax.set_xlabel("landing error after a jump, A (pixels)")
+            ax.set_xticks(amps, [f"{a:g}" for a in amps])
+        axes[i, 0].set_ylabel("PSNR (dB)")
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="upper center", ncol=len(methods),
+               bbox_to_anchor=(0.5, 0.0))
+    fig.suptitle("Scan-coil landing errors (decay τ = 2 px); partial raster has no in-line jumps",
+                 x=0.01, ha="left", fontsize=11, color=INK)
+    _save(fig, out)
+
+
+def coil_error_table(rows) -> str:
+    """Markdown: PSNR at A = 0 and the paired drop at each amplitude, per method, pattern, fraction."""
+    amps = sorted({r["amp"] for r in rows})
+    per = defaultdict(dict)
+    for r in rows:
+        per[(r["method"], r["pattern"], r["frac"])][(r["image"], r["amp"])] = r["psnr"]
+    lines = ["| method | pattern | fraction | PSNR at A = 0 | " + " | ".join(f"Δ at A = {a:g}" for a in amps[1:]) + " |",
+             "|---|---|---|---|" + "---|" * (len(amps) - 1)]
+    for m in _methods(rows):
+        for p in PATTERN_ORDER:
+            for fr in sorted({r["frac"] for r in rows}):
+                d = per.get((m, p, fr))
+                if not d:
+                    continue
+                imgs = sorted({i for i, _ in d})
+                base = np.array([d[(i, amps[0])] for i in imgs])
+                drops = [np.mean([d[(i, a)] for i in imgs] - base) for a in amps[1:]]
+                lines.append(f"| {METHOD_STYLE.get(m, {'label': m})['label']} | {PATTERN_STYLE[p]['label']} | {fr:.0%} | "
+                             f"{base.mean():.2f} | " + " | ".join(f"{x:+.2f}" for x in drops) + " |")
+    n = len({r["image"] for r in rows})
+    return (f"PSNR (dB) on {n} test images, fixed dwell (D = 20). Δ is the paired change from A = 0.\n\n"
+            + "\n".join(lines) + "\n")

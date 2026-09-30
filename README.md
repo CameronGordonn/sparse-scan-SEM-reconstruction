@@ -167,6 +167,42 @@ Each category has 10 test images. The ordering holds in all 10 categories and bo
 - **Easiest categories:** isolated objects on smooth backgrounds, such as tips and particles (about 30 dB).
 - **Where the U-Net gains most over TV-L2:** on fibres, +3.2 dB [2.5, 3.9]; the gain is smallest on biological specimens, +1.2 dB [0.9, 1.5]. The table with paired CIs is in `results/summary.md`.
 
+### Scan-coil position errors
+
+The main evaluation assumes the beam lands exactly where it is sent. Real deflection coils overshoot after a blanked jump and settle over a few pixels. This is a **sensitivity analysis**, not a calibrated model: no measured coil data was available.
+
+**The model** (`semrecon/coils.py`):
+- After every blanked in-line jump, the beam lands displaced along the scan line by e_k = A·exp(−k/τ) for the k-th pixel of the segment, with τ = 2 px.
+- The first segment of each line follows the flyback and is assumed settled.
+- The detector records the image at the displaced position, but the value is filed under the nominal pixel.
+
+**What each pattern sees:**
+- partial raster has no in-line jumps, so it is unaffected by construction;
+- line-hop is shifted only at the start of each segment;
+- uniform sampling starts almost every pixel with a jump.
+
+**The run:** A = 0, 0.5, 1 and 2 px, on the first 30 test images at 10% and 30% sampling (fixed dwell), with the existing models; nothing is retrained. At A = 0 the measurements are bit-identical to the main evaluation.
+
+![scan-coil landing errors](results/figures/coil_errors.png)
+
+| U-Net PSNR (dB) | A = 0 | A = 1 | A = 2 |
+|---|---|---|---|
+| uniform 10% | 23.74 | 23.33 | 22.65 |
+| partial raster 10% | 22.99 | 22.99 | 22.99 |
+| line-hop 10% | 22.75 | 22.72 | 22.66 |
+| uniform 30% | 25.42 | 24.60 | 23.42 |
+| partial raster 30% | 25.21 | 25.21 | 25.21 |
+| line-hop 30% | 24.81 | 24.73 | 24.56 |
+
+- **Uniform sampling degrades steadily with the landing error, and its advantage at equal pixel count disappears.**
+  - At A = 2 px the U-Net loses 1.1 dB at 10% and 2.0 dB at 30%.
+  - Uniform's lead over partial raster at the same fraction, 0.75 dB at 10% and 0.21 dB at 30%, turns into a deficit. Uniform falls behind somewhere between A = 1 and 2 px at 10%, and at about 0.5 px at 30%.
+  - At equal scan time, uniform was already far behind; this widens the gap.
+- **Line-hop barely notices:** at most −0.25 dB at A = 2 px, because only the first couple of pixels of each segment are off.
+- **The learned models are more sensitive than TV:** the U-Net loses 2.0 dB on uniform 30% at A = 2 px, where TV-L2 loses 0.8 dB. The uniform-only U-Net behaves like the U-Net. Both were trained on perfectly registered data and rely on fine detail that misregistration corrupts. Training with simulated landing errors would be the natural fix; it wasn't tried here.
+
+`results/jitter/summary.md` has all three methods; the raw rows are in `results/jitter/metrics_*.csv`.
+
 ### Findings
 
 - **The U-Net is best in every one of the 30 cases, in both regimes.**
@@ -198,7 +234,7 @@ Each category has 10 test images. The ordering holds in all 10 categories and bo
 
 ## What this simulation ignores
 
-- **Scan-coil dynamics.** Hysteresis, overshoot and settling transients are reduced to one constant settle time per jump. Real line-hop scans would show position errors at the start of each segment, and those errors depend on the jump length.
+- **Scan-coil dynamics.** The main evaluation reduces hysteresis, overshoot and settling to one constant settle time per jump. [Scan-coil position errors](#scan-coil-position-errors) adds a simple overshoot model as a sensitivity analysis. It still ignores hysteresis, a dependence on jump length, and slow-axis errors, and it is not calibrated against a real microscope.
 - **Drift.** Stage and beam drift between lines, and over a long acquisition, are absent. Sparse scans taken quickly suffer *less* drift than a full raster, an advantage this simulation does not credit.
 - **Charging and beam damage.** Insulating specimens charge nonuniformly, and the charging depends on scan order and dwell. That changes contrast and can deflect the beam. The fixed-dose regime counts total dose, but it does not model damage or charging.
 - **Detector response.** The model omits:
@@ -243,6 +279,13 @@ python scripts/evaluate.py --stage eval --methods diffusion --diffusion-ckpt che
 
 python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt \
     --unet-uniform-ckpt checkpoints/unet_uniform_only/best.pt --diffusion-ckpt checkpoints/diffusion/best.pt
+
+# scan-coil landing-error sensitivity (CPU, ~1 h): TV-L2 and both U-Nets, then the figure and table
+python scripts/coil_errors.py --methods tv_l2 --out results/jitter/metrics_tv_l2.csv
+python scripts/coil_errors.py --methods unet --unet-ckpt checkpoints/unet/best.pt --out results/jitter/metrics_unet.csv
+python scripts/coil_errors.py --methods unet --unet-ckpt checkpoints/unet_uniform_only/best.pt \
+    --method-name unet_uniform_only --out results/jitter/metrics_unet_uniform_only.csv
+python scripts/coil_errors.py --stage plot
 ```
 
 - **Colab:** `colab/train.ipynb` keeps the dataset tars, splits, eval sets, checkpoints and results on Drive, and extracts the images to local disk each session. Run it cell by cell, or run its last section to launch `colab/launch_all.sh`, which trains and evaluates every learned model unattended in two parallel lanes on one GPU.
@@ -251,9 +294,10 @@ python scripts/make_figures.py --unet-ckpt checkpoints/unet/best.pt \
 ## Layout
 
 ```
-src/semrecon/  data, forward, patterns, metrics, evaluate, plots, train_unet, train_diffusion
+src/semrecon/  data, forward, patterns, coils, metrics, uncertainty, evaluate, plots, train_unet, train_diffusion
                baselines/{biharmonic,tv}.py   models/{unet,diffusion}.py
-scripts/       prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures
+scripts/       prepare_data, cache_images, show_patterns, train_*, evaluate, make_figures,
+               coil_errors, diffusion_analysis
 configs/       eval.yaml, unet.yaml, diffusion.yaml, *smoke.yaml
 results/       metrics*.csv, tv_lambdas.json, summary.md, figures/
 colab/ hpc/ tests/

@@ -33,3 +33,12 @@ def test_frontier_keeps_only_improvements_in_time_order():
     assert [(p[2], p[3]) for p in pts] == [("partial_raster", 0.1), ("partial_raster", 0.3), ("uniform", 0.3)]
     table = frontier_table(rows, "fixed_dwell", budgets=(0.1, 0.3, 1.0))
     assert "24.00 (raster 10%" in table and "26.00 (raster 30%" in table  # 1% budget slack
+
+
+def test_coil_error_table_reports_paired_drops():
+    from semrecon.plots import coil_error_table
+
+    rows = [{"method": "unet", "pattern": "uniform", "frac": 0.1, "image": str(i), "amp": a,
+             "psnr": 25.0 + i - 2 * a} for i in range(3) for a in (0.0, 1.0)]
+    table = coil_error_table(rows)
+    assert "| 26.00 | -2.00 |" in table and "3 test images" in table
