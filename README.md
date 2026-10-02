@@ -10,7 +10,9 @@ This project asks two questions. Which software fills in the gaps best? And whic
 
 *A test image scanned at 20% of its lines, in a fifth of the time of a full scan. The neural network (right) recovers the fibres; the two traditional methods give a noisy or blurred result. The dB score measures closeness to the original; higher is better.*
 
-**New to the topic?** Read the plain-language write-up on the [project website](https://camerongordonn.github.io/sparse-scan-SEM-reconstruction/), or as a PDF: [`docs/results-explained.pdf`](docs/results-explained.pdf). It explains the study and every finding with the key figures. The full methods, tables and statistics are in [`docs/technical-details.md`](docs/technical-details.md).
+**Try it in your browser** on the [project website](https://camerongordonn.github.io/sparse-scan-SEM-reconstruction/): upload an SEM image (or pick an example) and see two methods reconstruct a simulated sparse scan of it. Nothing to install, and your image stays on your device.
+
+**New to the topic?** The plain-language write-up, [`docs/results-explained.pdf`](docs/results-explained.pdf), explains the study and every finding with the key figures. The full methods, tables and statistics are in [`docs/technical-details.md`](docs/technical-details.md).
 
 ## What we found
 
@@ -41,7 +43,7 @@ The findings were then checked on real scans of mouse brain tissue from a public
 
 ## Try it on your own image
 
-You need Python 3.11 or newer. A GPU is optional.
+The quickest way is the [website](https://camerongordonn.github.io/sparse-scan-SEM-reconstruction/), which runs the U-Net and TV-L2 in your browser. To run every method, including diffusion, or to reconstruct a real sparse scan, use the command line. You need Python 3.11 or newer. A GPU is optional.
 
 ```bash
 git clone https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction.git
@@ -101,8 +103,8 @@ The exact commands for every step are in [`docs/technical-details.md`](docs/tech
 src/semrecon/   the library: data, noise and scan simulation, methods, scoring
 scripts/        command-line entry points (reconstruct, evaluate, train, make_figures, ...)
 results/        every score as CSV, summary tables, and all figures
-docs/           the plain-language write-up and the technical details
-site/           the project website (deployed to GitHub Pages on every push)
+docs/           the plain-language write-up (writeup.html, printed to the PDF) and the technical details
+site/           the project website and in-browser demo (deployed to GitHub Pages)
 configs/ colab/ hpc/ tests/
 ```
 

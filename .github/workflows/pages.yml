@@ -3,7 +3,7 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: [site/**, results/figures/**, docs/results-explained.pdf, .github/workflows/pages.yml]
+    paths: [site/**, results/figures/**, docs/results-explained.pdf, scripts/export_onnx.py, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:
@@ -23,6 +23,13 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # CPU torch is enough to export the U-Net to ONNX for the in-browser demo
+      - run: |
+          pip install "torch==2.14.*" --index-url https://download.pytorch.org/whl/cpu
+          pip install -e . onnx
       - run: bash site/build.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
