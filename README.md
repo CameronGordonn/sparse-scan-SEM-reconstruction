@@ -15,6 +15,12 @@ What sets it apart from a generic inpainting benchmark:
 - **Checked on real scans.** Real partial-raster scans from a PFIB-SEM test the noise model and the models' transfer (see [Real SEM data](#real-sem-data)).
 - **Learned models.** A U-Net conditioned on the sampling mask is trained across fractions, patterns and doses. A conditional diffusion model is adapted from [diffusion-sparse-reconstruction-hpc](https://github.com/CameronGordonn/diffusion-sparse-reconstruction-hpc).
 
+**In short:**
+- In simulation, the U-Net is best in all 30 cases, about 2 dB ahead of TV-L2 and at 0.03 s per crop. Diffusion is second; it ties the U-Net only by averaging 16 samples.
+- At equal scan time, scanning a subset of whole lines (partial raster) wins by a wide margin. Random pixels spend most of the time on coil settling, and they also suffer most when the coils land imprecisely.
+- Networks must be trained on the patterns they will see: a uniform-only U-Net falls below TV-L2 on partial raster.
+- On real PFIB-SEM scans, the U-Net wins only where the real noise resembles its simulated training noise (2 µs dwell). At 0.5 µs the noise is coloured and far from Poisson, and TV-L2 beats it at 20–30% of lines. Retraining on realistic noise is the main open step (see [Open questions](#open-questions)).
+
 ## Data
 
 The dataset is **NFFA-Europe "100% SEM"** (Aversa et al., CNR-IOM): 21,169 SEM images at 1024×768 in 10 categories (particles, MEMS, nanowires, fibres, …).
@@ -326,6 +332,16 @@ Tables: [`results/real_data/summary.md`](results/real_data/summary.md). Paired d
   [Real SEM data](#real-sem-data) measures what this costs on one real microscope. Below 1 µs dwell the real noise grows much faster than shot noise as dwell shrinks, and it is coloured along the scan rows. The U-Net, trained on white Poisson noise, then loses 1–2.3 dB against its simulated twin and leaves stripes.
 - **Ground truth is not truth.** The "clean" images are themselves noisy, JPEG-compressed acquisitions. Metrics measure agreement with another noisy image, and the learned models partly learn JPEG artifacts.
 
+## Open questions
+
+None of these has been run.
+
+- **Train on realistic noise.** This is the main open step. On the simulated twin (the same brain-tissue slices with Poisson noise at the real noise power) the U-Net beats TV-L2 by 1.3–1.8 dB. So the unfamiliar images alone don't explain its loss on real data; the noise does. Training with noise matched to the measurements in `--stage noise`, with power growing faster than shot noise below 1 µs and a lag-1 correlation of about −0.3 along the rows, should recover much of the 1–2.3 dB lost against the twin, and remove the stripes. That is a prediction. `real_data.py --stage recon --unet-ckpt <new model>` would test it.
+- **Fine-tune on real pairs.** The aligned 0.5 µs / 2 µs volume could serve as sparse input and target. Slices would need to be split in blocks, because neighbouring slices are nearly identical. This would show what a model trained on one microscope can do there, and how much the image-domain shift costs on its own, but on one specimen it says little about other instruments.
+- **Train with coil landing errors,** to see whether the networks' extra sensitivity to misplaced pixels goes away.
+- **Calibrate the diffusion spread,** which under-states the error by about 1.7×.
+- **More microscopes and specimens,** ideally true sparse acquisitions where the beam really skips pixels or segments, not only whole lines dropped after the fact.
+
 ## Pretrained weights
 
 The three trained models are attached to the [`weights-v1` release](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/releases/tag/weights-v1). Each is an inference-only checkpoint of about 31 MB, and the release notes list their sha256 checksums. With them you can skip training and go straight to evaluation or `make_figures.py`:
@@ -361,7 +377,7 @@ Options:
 
 The U-Net takes a few seconds per image on a CPU; diffusion (`--methods diffusion`) takes minutes on a CPU and seconds on a GPU.
 
-The models only know the NFFA training distribution: 10 SEM categories, secondary-electron contrast, and noise up to the trained dose range. Expect them to degrade on very different imagery, such as backscatter or inverted-contrast biological sections, and on coils that land imprecisely (see *Scan-coil position errors*). On real short-dwell scans with coloured noise it loses to TV-L2 (see *Real SEM data*).
+The models only know the NFFA training distribution: 10 SEM categories, secondary-electron contrast, and noise up to the trained dose range. Expect them to degrade on very different imagery, such as backscatter or inverted-contrast biological sections, and on coils that land imprecisely (see *Scan-coil position errors*). On real short-dwell scans with coloured noise, the U-Net loses to TV-L2 at 20–30% of lines (see *Real SEM data*).
 
 ## Reproduce
 
