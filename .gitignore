@@ -8,3 +8,4 @@ results/*.npz
 .pytest_cache/
 logs/
 results/real_data/*.npz
+_site/
