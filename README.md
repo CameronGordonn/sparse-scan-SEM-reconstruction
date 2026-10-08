@@ -24,6 +24,16 @@ This project asks two questions. Which software fills in the gaps best? And whic
 
 The main open question is whether training the network on realistic noise closes that gap. The evidence suggests it would, but it hasn't been tested yet; see [Open questions](docs/technical-details.md#open-questions).
 
+## Limitations
+
+- **The noise is simulated as pure shot noise.** Real detectors add more. On the one real dataset tested, noise below 1 µs per pixel grew much faster than shot noise as exposure shrank, and it was correlated along the scan lines.
+- **The beam-timing figures are assumed, not measured.** Settling takes 5 µs after a jump and the return at the end of a line 50 µs. The beam-landing error test is a sensitivity check, and coil hysteresis and drift are left out.
+- **Charging and beam damage are not modelled.**
+- **The real-data check is small:** one specimen, one microscope (a Zeiss Gemini 300), 20 slices.
+- **Scores measure closeness to a reference image (PSNR, SSIM).** There is no resolution measure such as Fourier ring correlation, and no reliable way yet to flag detail the network invented.
+
+The full list is in [What this simulation ignores](docs/technical-details.md#what-this-simulation-ignores).
+
 ## How it works
 
 The study takes 21,169 real SEM images from the public [NFFA-Europe collection](https://doi.org/10.23728/b2share.80df8606fcdb4b2bae1656f0dc6db8ba), simulates a sparse scan of each, and scores how well each method recovers the original. The simulation includes the two things that matter most on a real microscope:
