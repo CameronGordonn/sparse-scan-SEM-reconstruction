@@ -2,15 +2,19 @@
 
 [![CI](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/actions/workflows/ci.yml/badge.svg)](https://github.com/CameronGordonn/sparse-scan-SEM-reconstruction/actions/workflows/ci.yml)
 
-A scanning electron microscope (SEM) builds an image one pixel at a time, by moving an electron beam across the specimen. Measuring only a fraction of the pixels makes the scan faster and exposes delicate specimens to less of the beam. The skipped pixels then have to be filled in by software.
+Fills in the pixels a scanning electron microscope skips, so a scan can be faster and gentler on the specimen, and tests which methods and scan patterns work best.
 
-This project asks two questions. Which software fills in the gaps best? And which pixels should the microscope measure to give it the best chance?
+**[Try it in your browser](https://camerongordonn.github.io/sparse-scan-SEM-reconstruction/)**: upload an SEM image or pick an example. Nothing to install, and your image stays on your device.
+
+- A trained U-Net beats the traditional methods in **all 30** simulated test conditions, by about **2 dB**, at **0.03 s** per image.
+- Skip whole lines, not scattered pixels: measuring just 5% of pixels at random already takes **0.34×** a full scan's time, because the beam settles after every jump.
+- A diffusion model can tie the U-Net, but only at about **600×** the compute.
 
 ![a fibre image scanned at 20% of its lines, filled in three ways](results/figures/reconstruct_example.png)
 
 *A test image scanned at 20% of its lines, in a fifth of the time of a full scan. The neural network (right) recovers the fibres; the two traditional methods give a noisy or blurred result. The dB score measures closeness to the original; higher is better.*
 
-**Try it in your browser** on the [project website](https://camerongordonn.github.io/sparse-scan-SEM-reconstruction/): upload an SEM image (or pick an example) and see two methods reconstruct a simulated sparse scan of it. Nothing to install, and your image stays on your device.
+A scanning electron microscope (SEM) builds an image one pixel at a time, by moving an electron beam across the specimen. Measuring only a fraction of the pixels makes the scan faster and exposes delicate specimens to less of the beam. The skipped pixels then have to be filled in by software. This project asks two questions. Which software fills in the gaps best? And which pixels should the microscope measure to give it the best chance?
 
 **New to the topic?** The plain-language write-up, [`docs/results-explained.pdf`](docs/results-explained.pdf), explains the study and every finding with the key figures. The full methods, tables and statistics are in [`docs/technical-details.md`](docs/technical-details.md).
 
@@ -23,6 +27,16 @@ This project asks two questions. Which software fills in the gaps best? And whic
 5. **On a real microscope, the network wins only when the real noise resembles its training noise.** On real scans at short exposure times, the noise behaves differently from the simulation's, and a traditional method beats the network. At longer exposures the network wins again.
 
 The main open question is whether training the network on realistic noise closes that gap. The evidence suggests it would, but it hasn't been tested yet; see [Open questions](docs/technical-details.md#open-questions).
+
+## Limitations
+
+- **The noise is simulated as pure shot noise.** Real detectors add more. On the one real dataset tested, noise below 1 µs per pixel grew much faster than shot noise as exposure shrank, and it was correlated along the scan lines.
+- **The beam-timing figures are assumed, not measured.** Settling takes 5 µs after a jump and the return at the end of a line 50 µs. The beam-landing error test is a sensitivity check, and coil hysteresis and drift are left out.
+- **Charging and beam damage are not modelled.**
+- **The real-data check is small:** one specimen, one microscope (a Zeiss Gemini 300), 20 slices.
+- **Scores measure closeness to a reference image (PSNR, SSIM).** There is no resolution measure such as Fourier ring correlation, and no reliable way yet to flag detail the network invented.
+
+The full list is in [What this simulation ignores](docs/technical-details.md#what-this-simulation-ignores).
 
 ## How it works
 
